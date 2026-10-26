@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  <base href="/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="frontend">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>TalentAI (Nxsus) • AI-First Recruitment Platform</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    body {
+      background-color: #080B11;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      user-select: none;
+    }
+    #talentai-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: #080B11;
+      color: #F8FAFC;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      z-index: 999999;
+      transition: opacity 0.3s ease, visibility 0.3s ease;
+    }
+    #talentai-loader.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .talentai-spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(217, 70, 239, 0.15);
+      border-top-color: #D946EF;
+      border-right-color: #8B5CF6;
+      border-radius: 50%;
+      animation: talentai-spin 0.75s linear infinite;
+      margin-bottom: 18px;
+    }
+    .talentai-brand {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px;
+    }
+    .talentai-brand span {
+      color: #D946EF;
+    }
+    .talentai-status {
+      font-size: 13px;
+      color: #94A3B8;
+    }
+    @keyframes talentai-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+  <script>
+    window.TalentAIWebRTC = (function() {
+      let localStream = null;
+      let screenStream = null;
+      let myUserId = 'me';
+      let onSignalCb = null;
+      let onRemoteTrackCb = null;
+
+      // Map of remoteUserId -> { userId, pc, remoteStream, candidateQueue: [], audioElem, videoElem }
+      const peers = {};
+
+      const rtcConfig = {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' }
+        ]
+      };
+
+      async function getMediaStream() {
+        if (localStream) return localStream;
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 } },
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          });
+        } catch (e1) {
+          try {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          } catch (e2) {
+            try {
+              localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (e3) {
+              console.warn('Could not acquire audio/video stream:', e3);
+              localStream = null;
+            }
+          }
+        }
+        return localStream;
+      }
+
+      function unlockAudio() {
+        Object.values(peers).forEach(p => {
+          if (p.audioElem) {
+            p.audioElem.play().catch(() => {});
+          }
+        });
+      }
+
+      // Automatically unlock audio on any user interaction
+      ['click', 'touchstart', 'keydown'].forEach(evt => {
+        window.addEventListener(evt, unlockAudio, { passive: true });
+      });
+
+      function getOrCreatePeer(remoteUserId) {
+        const uid = String(remoteUserId);
+        if (peers[uid]) {
+          return peers[uid];
+        }
+
+        const pc = new RTCPeerConnection(rtcConfig);
+        const remoteStream = new MediaStream();
+
+        // Dedicated audio element for this participant so their voice plays multi-way to everyone!
+        let audioElem = document.getElementById('talentai-audio-' + uid);
+        if (!audioElem) {
+          audioElem = document.createElement('audio');
+          audioElem.id = 'talentai-audio-' + uid;
+          audioElem.autoplay = true;
+          audioElem.playsInline = true;
+          document.body.appendChild(audioElem);
+        }
+        audioElem.srcObject = remoteStream;
+
+        const peerObj = {
+          userId: uid,
+          pc: pc,
+          remoteStream: remoteStream,
+          candidateQueue: [],
+          audioElem: audioElem,
+          videoElem: null
+        };
+        peers[uid] = peerObj;
+
+        // Add local tracks to this peer connection
+        if (localStream) {
+          localStream.getTracks().forEach(track => {
+            pc.addTrack(track, localStream);
+          });
+        }
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate && onSignalCb) {
+            onSignalCb(JSON.stringify({
+              type: 'candidate',
+              candidate: event.candidate,
+              from_user: myUserId,
+              to_user: uid
+            }), uid);
+          }
+        };
+
+        pc.ontrack = (event) => {
+          console.log('WebRTC: Remote track received from', uid, event.track.kind);
+          peerObj.remoteStream.addTrack(event.track);
+
+          // Update dedicated audio playback
+          if (peerObj.audioElem) {
+            peerObj.audioElem.srcObject = peerObj.remoteStream;
+            peerObj.audioElem.play().catch(e => console.log('Audio autoplay:', e));
+          }
+
+          // Update video element if attached
+          if (peerObj.videoElem) {
+            peerObj.videoElem.srcObject = peerObj.remoteStream;
+            peerObj.videoElem.play().catch(() => {});
+          }
+
+          if (onRemoteTrackCb) {
+            onRemoteTrackCb(uid, true);
+          }
+        };
+
+        pc.onconnectionstatechange = () => {
+          console.log('WebRTC peer connection state for', uid, ':', pc.connectionState);
+          if (pc.connectionState === 'connected') {
+            if (peerObj.audioElem) {
+              peerObj.audioElem.play().catch(() => {});
+            }
+          }
+        };
+
+        return peerObj;
+      }
+
+      return {
+        init: async function(onSignal, onRemoteTrack, userId) {
+          onSignalCb = onSignal;
+          onRemoteTrackCb = onRemoteTrack;
+          if (userId) myUserId = String(userId);
+          const stream = await getMediaStream();
+          return Boolean(stream);
+        },
+
+        attachLocalVideo: function(videoElem) {
+          if (videoElem) {
+            videoElem.id = 'talentai-local-video';
+            if (localStream) {
+              videoElem.srcObject = localStream;
+              videoElem.play().catch(() => {});
+            }
+          }
+        },
+
+        attachRemoteVideoForUser: function(remoteUserId, videoElem) {
+          const uid = String(remoteUserId);
+          if (videoElem) {
+            const peer = getOrCreatePeer(uid);
+            peer.videoElem = videoElem;
+            if (peer.remoteStream) {
+              videoElem.srcObject = peer.remoteStream;
+              videoElem.play().catch(() => {});
+            }
+          }
+        },
+
+        attachRemoteVideo: function(videoElem) {
+          const firstKey = Object.keys(peers)[0] || 'default';
+          window.TalentAIWebRTC.attachRemoteVideoForUser(firstKey, videoElem);
+        },
+
+        createOfferForUser: async function(remoteUserId) {
+          try {
+            const uid = String(remoteUserId);
+            const peer = getOrCreatePeer(uid);
+            const offer = await peer.pc.createOffer({
+              offerToReceiveAudio: true,
+              offerToReceiveVideo: true
+            });
+            await peer.pc.setLocalDescription(offer);
+            if (onSignalCb) {
+              onSignalCb(JSON.stringify({
+                type: 'offer',
+                sdp: peer.pc.localDescription,
+                from_user: myUserId,
+                to_user: uid
+              }), uid);
+            }
+          } catch (e) {
+            console.error('Failed to create WebRTC offer for', remoteUserId, e);
+          }
+        },
+
+        createOffer: async function() {
+          const keys = Object.keys(peers);
+          if (keys.length > 0) {
+            for (const k of keys) {
+              await window.TalentAIWebRTC.createOfferForUser(k);
+            }
+          }
+        },
+
+        handleSignal: async function(signalJson, explicitFromUser) {
+          try {
+            const signal = typeof signalJson === 'string' ? JSON.parse(signalJson) : signalJson;
+            const fromUser = String(signal.from_user || explicitFromUser || 'default');
+            const toUser = signal.to_user ? String(signal.to_user) : '';
+
+            // Ignore if signal is specifically addressed to someone else
+            if (toUser && toUser !== String(myUserId) && toUser !== 'all') {
+              return;
+            }
+
+            // Don't process signals from myself
+            if (fromUser === String(myUserId)) {
+              return;
+            }
+
+            const peer = getOrCreatePeer(fromUser);
+
+            if (signal.type === 'offer') {
+              await peer.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+
+              // Process any queued ICE candidates
+              if (peer.candidateQueue.length > 0) {
+                for (const cand of peer.candidateQueue) {
+                  try {
+                    await peer.pc.addIceCandidate(new RTCIceCandidate(cand));
+                  } catch (_) {}
+                }
+                peer.candidateQueue = [];
+              }
+
+              const answer = await peer.pc.createAnswer();
+              await peer.pc.setLocalDescription(answer);
+              if (onSignalCb) {
+                onSignalCb(JSON.stringify({
+                  type: 'answer',
+                  sdp: peer.pc.localDescription,
+                  from_user: myUserId,
+                  to_user: fromUser
+                }), fromUser);
+              }
+            } else if (signal.type === 'answer') {
+              if (peer.pc.signalingState !== 'stable') {
+                await peer.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+
+                // Process any queued ICE candidates
+                if (peer.candidateQueue.length > 0) {
+                  for (const cand of peer.candidateQueue) {
+                    try {
+                      await peer.pc.addIceCandidate(new RTCIceCandidate(cand));
+                    } catch (_) {}
+                  }
+                  peer.candidateQueue = [];
+                }
+              }
+            } else if (signal.type === 'candidate' && signal.candidate) {
+              if (peer.pc.remoteDescription && peer.pc.remoteDescription.type) {
+                try {
+                  await peer.pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                } catch (iceErr) {
+                  console.warn('Error adding ICE candidate:', iceErr);
+                }
+              } else {
+                peer.candidateQueue.push(signal.candidate);
+              }
+            }
+          } catch (e) {
+            console.error('Failed to handle WebRTC signal:', e);
+          }
+        },
+
+        toggleCamera: async function(enabled) {
+          if (!localStream && enabled) {
+            localStream = await getMediaStream();
+          }
+
+          if (localStream) {
+            let videoTracks = localStream.getVideoTracks();
+            if (enabled && videoTracks.length === 0) {
+              try {
+                const newCamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const newTrack = newCamStream.getVideoTracks()[0];
+                if (newTrack) {
+                  localStream.addTrack(newTrack);
+                  videoTracks = [newTrack];
+                  Object.values(peers).forEach(p => {
+                    if (p.pc) {
+                      p.pc.addTrack(newTrack, localStream);
+                    }
+                  });
+                }
+              } catch (camErr) {
+                console.warn('Could not acquire camera on toggle:', camErr);
+              }
+            }
+
+            videoTracks.forEach(t => t.enabled = enabled);
+          }
+
+          const localVideo = document.getElementById('talentai-local-video');
+          if (localVideo && localStream) {
+            localVideo.srcObject = localStream;
+            localVideo.play().catch(() => {});
+          }
+        },
+
+        toggleMic: function(enabled) {
+          if (localStream) {
+            localStream.getAudioTracks().forEach(t => t.enabled = enabled);
+          }
+        },
+
+        startScreenShare: async function(onAttached) {
+          try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            const screenTrack = screenStream.getVideoTracks()[0];
+            Object.values(peers).forEach(p => {
+              if (p.pc) {
+                const sender = p.pc.getSenders().find(s => s.track && s.track.kind === 'video');
+                if (sender) {
+                  sender.replaceTrack(screenTrack);
+                } else {
+                  p.pc.addTrack(screenTrack, screenStream);
+                }
+              }
+            });
+            screenTrack.onended = () => {
+              window.TalentAIWebRTC.stopScreenShare();
+            };
+            if (onAttached) onAttached(screenStream);
+            return true;
+          } catch (e) {
+            console.warn('Screen share cancelled/failed:', e);
+            return false;
+          }
+        },
+
+        stopScreenShare: function() {
+          if (screenStream) {
+            screenStream.getTracks().forEach(t => t.stop());
+            screenStream = null;
+          }
+          if (localStream) {
+            const videoTrack = localStream.getVideoTracks()[0];
+            if (videoTrack) {
+              Object.values(peers).forEach(p => {
+                if (p.pc) {
+                  const sender = p.pc.getSenders().find(s => s.track && s.track.kind === 'video');
+                  if (sender) {
+                    sender.replaceTrack(videoTrack);
+                  }
+                }
+              });
+            }
+          }
+        },
+
+        getLocalStream: function() {
+          return localStream;
+        },
+
+        getRemoteStreamForUser: function(remoteUserId) {
+          const p = peers[String(remoteUserId)];
+          return p ? p.remoteStream : null;
+        },
+
+        close: function() {
+          if (localStream) {
+            localStream.getTracks().forEach(t => t.stop());
+            localStream = null;
+          }
+          if (screenStream) {
+            screenStream.getTracks().forEach(t => t.stop());
+            screenStream = null;
+          }
+          Object.values(peers).forEach(p => {
+            if (p.pc) {
+              try { p.pc.close(); } catch (_) {}
+            }
+            if (p.audioElem) {
+              try { p.audioElem.remove(); } catch (_) {}
+            }
+          });
+          for (const k in peers) delete peers[k];
+        }
+      };
+    })();
+
+    window.TalentAISpeech = (function() {
+      let recognition = null;
+      let active = false;
+      let onTranscriptCb = null;
+
+      const langMap = {
+        'Hindi': 'hi-IN',
+        'English': 'en-US',
+        'Spanish': 'es-ES',
+        'French': 'fr-FR',
+        'German': 'de-DE',
+        'Japanese': 'ja-JP',
+        'Arabic': 'ar-SA',
+        'Auto / Original': 'en-US'
+      };
+
+      return {
+        start: function(languageName, onTranscript) {
+          onTranscriptCb = onTranscript;
+          active = true;
+
+          const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (!SpeechClass) {
+            console.warn('Web Speech API not supported in this browser.');
+            return false;
+          }
+
+          if (recognition) {
+            try { recognition.stop(); } catch (_) {}
+          }
+
+          try {
+            recognition = new SpeechClass();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = langMap[languageName] || 'en-US';
+
+            recognition.onresult = function(event) {
+              let interim = '';
+              let finalTranscript = '';
+              for (let i = event.resultIndex; i < event.results.length; ++i) {
+                const res = event.results[i];
+                if (res.isFinal) {
+                  finalTranscript += res[0].transcript;
+                } else {
+                  interim += res[0].transcript;
+                }
+              }
+              const spoken = (finalTranscript || interim).trim();
+              if (spoken && onTranscriptCb) {
+                onTranscriptCb(spoken, Boolean(finalTranscript));
+              }
+            };
+
+            recognition.onerror = function(err) {
+              console.warn('Speech recognition error:', err.error);
+            };
+
+            recognition.onend = function() {
+              if (active) {
+                setTimeout(() => {
+                  if (active) {
+                    try { recognition.start(); } catch (_) {}
+                  }
+                }, 300);
+              }
+            };
+
+            recognition.start();
+            return true;
+          } catch (e) {
+            console.error('Failed to start speech recognition:', e);
+            return false;
+          }
+        },
+
+        stop: function() {
+          active = false;
+          if (recognition) {
+            try { recognition.stop(); } catch (_) {}
+            recognition = null;
+          }
+        }
+      };
+    })();
+  </script>
+</head>
+<body>
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+  <div id="talentai-loader">
+    <div class="talentai-spinner"></div>
+    <div class="talentai-brand">nxsu<span>s</span></div>
+    <div class="talentai-status">Initializing AI Recruitment Engine...</div>
+  </div>
+
+  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    (function initTalentAI() {
+      function dismissLoader() {
+        var loader = document.getElementById('talentai-loader');
+        if (loader) {
+          loader.classList.add('hidden');
+          setTimeout(function() {
+            if (loader.parentNode) loader.parentNode.removeChild(loader);
+          }, 400);
+        }
+      }
+
+      window.addEventListener('flutter-first-frame', dismissLoader);
+
+      var observer = new MutationObserver(function() {
+        var view = document.querySelector('flutter-view') || document.querySelector('flt-glass-pane');
+        if (view) {
+          dismissLoader();
+          observer.disconnect();
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+
+      var checkInterval = setInterval(function() {
+        var view = document.querySelector('flutter-view') || document.querySelector('flt-glass-pane');
+        if (view) {
+          clearInterval(checkInterval);
+          dismissLoader();
+        }
+      }, 200);
+
+      setTimeout(function() {
+        clearInterval(checkInterval);
+        dismissLoader();
+      }, 5000);
+    })();
+  </script>
+</body>
+</html>
