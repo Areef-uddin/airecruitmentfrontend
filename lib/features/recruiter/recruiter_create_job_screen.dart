@@ -38,6 +38,17 @@ class _RecruiterCreateJobScreenState extends ConsumerState<RecruiterCreateJobScr
   bool _isGeneratingAI = false;
   bool _isPublishing = false;
 
+  String _formatField(dynamic val) {
+    if (val == null) return '';
+    if (val is List) {
+      return val.map((item) {
+        final str = item.toString().trim();
+        return str.startsWith('-') || str.startsWith('•') ? str : '- $str';
+      }).join('\n');
+    }
+    return val.toString();
+  }
+
   void _generateWithAI() async {
     setState(() => _isGeneratingAI = true);
     try {
@@ -52,10 +63,10 @@ class _RecruiterCreateJobScreenState extends ConsumerState<RecruiterCreateJobScr
       );
 
       setState(() {
-        _descController.text = res['description'] ?? '';
-        _respController.text = res['responsibilities'] ?? '';
-        _reqController.text = res['requirements'] ?? '';
-        _benefitsController.text = res['benefits'] ?? '';
+        _descController.text = _formatField(res['description']);
+        _respController.text = _formatField(res['responsibilities']);
+        _reqController.text = _formatField(res['requirements']);
+        _benefitsController.text = _formatField(res['benefits']);
         _isGeneratingAI = false;
       });
 

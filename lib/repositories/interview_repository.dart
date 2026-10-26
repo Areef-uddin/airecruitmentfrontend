@@ -118,12 +118,13 @@ class InterviewRepository {
     }
   }
 
-  Future<void> joinRoom(String room, {String? role, String? name, bool? videoOn, bool? micOn}) async {
+  Future<void> joinRoom(String room, {String? userId, String? role, String? name, bool? videoOn, bool? micOn}) async {
     try {
       await _dio.post(
         ApiConfig.interviewRoomJoin,
         data: {
           'room': room,
+          if (userId != null && userId.isNotEmpty) 'user_id': userId,
           if (role != null) 'role': role,
           if (name != null) 'name': name,
           if (videoOn != null) 'video_on': videoOn,
@@ -133,12 +134,13 @@ class InterviewRepository {
     } catch (_) {}
   }
 
-  Future<void> sendHeartbeat(String room, {bool? videoOn, bool? micOn}) async {
+  Future<void> sendHeartbeat(String room, {String? userId, bool? videoOn, bool? micOn}) async {
     try {
       await _dio.post(
         ApiConfig.interviewRoomHeartbeat,
         data: {
           'room': room,
+          if (userId != null && userId.isNotEmpty) 'user_id': userId,
           if (videoOn != null) 'video_on': videoOn,
           if (micOn != null) 'mic_on': micOn,
         },
@@ -146,11 +148,14 @@ class InterviewRepository {
     } catch (_) {}
   }
 
-  Future<void> leaveRoom(String room) async {
+  Future<void> leaveRoom(String room, {String? userId}) async {
     try {
       await _dio.post(
         ApiConfig.interviewRoomLeave,
-        data: {'room': room},
+        data: {
+          'room': room,
+          if (userId != null && userId.isNotEmpty) 'user_id': userId,
+        },
       );
     } catch (_) {}
   }
@@ -230,6 +235,34 @@ class InterviewRepository {
         'What strategies do you use for performance profiling and error logging?',
         'Explain a complex technical bug you solved recently and your thought process.',
       ];
+    }
+  }
+
+  Future<String> getVoiceInterviewQuestion({
+    required String jobTitle,
+    List<String>? skills,
+    int round = 1,
+    String? candidateName,
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.aiVoiceQuestion,
+        data: {
+          'job_title': jobTitle,
+          'skills': skills ?? ['Flutter', 'Python', 'System Architecture'],
+          'round': round,
+          'candidate_name': candidateName ?? '',
+        },
+      );
+      return response.data['question'] ?? 'Could you introduce yourself and describe your technical background?';
+    } catch (_) {
+      final defaults = [
+        'Welcome! Could you walk me through your background and the most complex system you have architected?',
+        'How do you handle scalability, database indexing, and asynchronous queues under high load?',
+        'What is your approach to state management, clean architecture, and reactive UI patterns?',
+        'Describe a complex production incident or memory leak you diagnosed and resolved.',
+      ];
+      return defaults[(round - 1) % defaults.length];
     }
   }
 }

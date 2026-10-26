@@ -100,15 +100,84 @@
           { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:stun2.l.google.com:19302' },
           { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' }
-        ]
+          { urls: 'stun:stun4.l.google.com:19302' },
+          { urls: 'stun:stun.services.mozilla.com' },
+          { urls: 'stun:global.stun.twilio.com:3478' },
+          {
+            urls: [
+              'turn:openrelay.metered.ca:80',
+              'turn:openrelay.metered.ca:443',
+              'turn:openrelay.metered.ca:443?transport=tcp'
+            ],
+            username: 'openrelay',
+            credential: 'openrelay'
+          }
+        ],
+        iceCandidatePoolSize: 10
       };
+
+      let audioCtx = null;
+      function ensureAudioContext() {
+        try {
+          if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+        } catch (_) {}
+        Object.values(peers).forEach(p => {
+          if (p.audioElem) {
+            p.audioElem.play().catch(() => {});
+          }
+        });
+      }
+
+      ['click', 'touchstart', 'keydown'].forEach(evt => {
+        window.addEventListener(evt, ensureAudioContext, { passive: true });
+      });
+
+      function playRemoteAudio(uid, stream) {
+        const peer = peers[uid];
+        if (!peer) return;
+
+        // 1. Play through dedicated HTMLAudioElement
+        if (peer.audioElem) {
+          try {
+            peer.audioElem.srcObject = stream;
+            peer.audioElem.muted = false;
+            peer.audioElem.volume = 1.0;
+            const playPromise = peer.audioElem.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(e => {
+                console.log('Audio autoplay waiting for user interaction:', e);
+              });
+            }
+          } catch (err) {
+            console.warn('HTMLAudio play error:', err);
+          }
+        }
+
+        // 2. Play through Web Audio Context destination (bypasses browser autoplay tag blocks)
+        try {
+          ensureAudioContext();
+          if (audioCtx) {
+            if (peer.audioSourceNode) {
+              try { peer.audioSourceNode.disconnect(); } catch (_) {}
+            }
+            peer.audioSourceNode = audioCtx.createMediaStreamSource(stream);
+            peer.audioSourceNode.connect(audioCtx.destination);
+          }
+        } catch (webaudioErr) {
+          console.warn('WebAudio connect error:', webaudioErr);
+        }
+      }
 
       async function getMediaStream() {
         if (localStream) return localStream;
         try {
           localStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 640 }, height: { ideal: 480 } },
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { max: 30 } },
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
           });
         } catch (e1) {
@@ -126,38 +195,44 @@
         return localStream;
       }
 
-      function unlockAudio() {
-        Object.values(peers).forEach(p => {
-          if (p.audioElem) {
-            p.audioElem.play().catch(() => {});
-          }
-        });
+      function syncLocalTracksToPeer(peerObj) {
+        if (!localStream || !peerObj || !peerObj.pc) return;
+        try {
+          const senders = peerObj.pc.getSenders();
+          localStream.getTracks().forEach(track => {
+            const alreadyAdded = senders.some(s => s.track && s.track.kind === track.kind);
+            if (!alreadyAdded) {
+              try {
+                peerObj.pc.addTrack(track, localStream);
+              } catch (addErr) {
+                console.warn('Could not add track to peer:', addErr);
+              }
+            }
+          });
+        } catch (_) {}
       }
-
-      // Automatically unlock audio on any user interaction
-      ['click', 'touchstart', 'keydown'].forEach(evt => {
-        window.addEventListener(evt, unlockAudio, { passive: true });
-      });
 
       function getOrCreatePeer(remoteUserId) {
         const uid = String(remoteUserId);
         if (peers[uid]) {
+          syncLocalTracksToPeer(peers[uid]);
           return peers[uid];
         }
 
         const pc = new RTCPeerConnection(rtcConfig);
         const remoteStream = new MediaStream();
 
-        // Dedicated audio element for this participant so their voice plays multi-way to everyone!
+        // Dedicated audio element for this participant so their voice plays loud and clear
         let audioElem = document.getElementById('talentai-audio-' + uid);
         if (!audioElem) {
           audioElem = document.createElement('audio');
           audioElem.id = 'talentai-audio-' + uid;
           audioElem.autoplay = true;
           audioElem.playsInline = true;
+          audioElem.muted = false;
+          audioElem.volume = 1.0;
           document.body.appendChild(audioElem);
         }
-        audioElem.srcObject = remoteStream;
 
         const peerObj = {
           userId: uid,
@@ -165,16 +240,13 @@
           remoteStream: remoteStream,
           candidateQueue: [],
           audioElem: audioElem,
+          audioSourceNode: null,
           videoElem: null
         };
         peers[uid] = peerObj;
 
         // Add local tracks to this peer connection
-        if (localStream) {
-          localStream.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-          });
-        }
+        syncLocalTracksToPeer(peerObj);
 
         pc.onicecandidate = (event) => {
           if (event.candidate && onSignalCb) {
@@ -189,18 +261,23 @@
 
         pc.ontrack = (event) => {
           console.log('WebRTC: Remote track received from', uid, event.track.kind);
-          peerObj.remoteStream.addTrack(event.track);
+          const activeStream = (event.streams && event.streams[0]) ? event.streams[0] : peerObj.remoteStream;
+          peerObj.remoteStream = activeStream;
+          try {
+            peerObj.remoteStream.addTrack(event.track);
+          } catch (_) {}
 
-          // Update dedicated audio playback
-          if (peerObj.audioElem) {
-            peerObj.audioElem.srcObject = peerObj.remoteStream;
-            peerObj.audioElem.play().catch(e => console.log('Audio autoplay:', e));
+          // Handle Audio: Route to both HTMLAudio and WebAudio destination
+          if (event.track.kind === 'audio' || activeStream.getAudioTracks().length > 0) {
+            playRemoteAudio(uid, activeStream);
           }
 
-          // Update video element if attached
-          if (peerObj.videoElem) {
-            peerObj.videoElem.srcObject = peerObj.remoteStream;
-            peerObj.videoElem.play().catch(() => {});
+          // Handle Video: Bind to video element if available
+          if (event.track.kind === 'video' || activeStream.getVideoTracks().length > 0) {
+            if (peerObj.videoElem) {
+              peerObj.videoElem.srcObject = activeStream;
+              peerObj.videoElem.play().catch(() => {});
+            }
           }
 
           if (onRemoteTrackCb) {
@@ -211,9 +288,13 @@
         pc.onconnectionstatechange = () => {
           console.log('WebRTC peer connection state for', uid, ':', pc.connectionState);
           if (pc.connectionState === 'connected') {
-            if (peerObj.audioElem) {
-              peerObj.audioElem.play().catch(() => {});
+            if (peerObj.remoteStream && peerObj.remoteStream.getAudioTracks().length > 0) {
+              playRemoteAudio(uid, peerObj.remoteStream);
             }
+          } else if (pc.connectionState === 'failed') {
+            try {
+              pc.restartIce();
+            } catch (_) {}
           }
         };
 
@@ -226,12 +307,19 @@
           onRemoteTrackCb = onRemoteTrack;
           if (userId) myUserId = String(userId);
           const stream = await getMediaStream();
+          Object.values(peers).forEach(p => syncLocalTracksToPeer(p));
           return Boolean(stream);
+        },
+
+        setUserId: function(userId) {
+          if (userId) myUserId = String(userId);
         },
 
         attachLocalVideo: function(videoElem) {
           if (videoElem) {
             videoElem.id = 'talentai-local-video';
+            videoElem.setAttribute('playsinline', 'true');
+            videoElem.setAttribute('webkit-playsinline', 'true');
             if (localStream) {
               videoElem.srcObject = localStream;
               videoElem.play().catch(() => {});
@@ -242,9 +330,11 @@
         attachRemoteVideoForUser: function(remoteUserId, videoElem) {
           const uid = String(remoteUserId);
           if (videoElem) {
+            videoElem.setAttribute('playsinline', 'true');
+            videoElem.setAttribute('webkit-playsinline', 'true');
             const peer = getOrCreatePeer(uid);
             peer.videoElem = videoElem;
-            if (peer.remoteStream) {
+            if (peer.remoteStream && peer.remoteStream.getTracks().length > 0) {
               videoElem.srcObject = peer.remoteStream;
               videoElem.play().catch(() => {});
             }
@@ -256,13 +346,18 @@
           window.TalentAIWebRTC.attachRemoteVideoForUser(firstKey, videoElem);
         },
 
-        createOfferForUser: async function(remoteUserId) {
+        createOfferForUser: async function(remoteUserId, iceRestart) {
           try {
             const uid = String(remoteUserId);
+            if (!localStream) {
+              localStream = await getMediaStream();
+            }
             const peer = getOrCreatePeer(uid);
+            syncLocalTracksToPeer(peer);
             const offer = await peer.pc.createOffer({
               offerToReceiveAudio: true,
-              offerToReceiveVideo: true
+              offerToReceiveVideo: true,
+              iceRestart: Boolean(iceRestart)
             });
             await peer.pc.setLocalDescription(offer);
             if (onSignalCb) {
@@ -282,7 +377,7 @@
           const keys = Object.keys(peers);
           if (keys.length > 0) {
             for (const k of keys) {
-              await window.TalentAIWebRTC.createOfferForUser(k);
+              await window.TalentAIWebRTC.createOfferForUser(k, false);
             }
           }
         },
@@ -294,7 +389,7 @@
             const toUser = signal.to_user ? String(signal.to_user) : '';
 
             // Ignore if signal is specifically addressed to someone else
-            if (toUser && toUser !== String(myUserId) && toUser !== 'all') {
+            if (toUser && toUser !== 'all' && toUser !== '' && toUser !== String(myUserId)) {
               return;
             }
 
@@ -303,7 +398,12 @@
               return;
             }
 
+            if (!localStream) {
+              localStream = await getMediaStream();
+            }
+
             const peer = getOrCreatePeer(fromUser);
+            syncLocalTracksToPeer(peer);
 
             if (signal.type === 'offer') {
               await peer.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));

@@ -147,23 +147,55 @@ class AppMobileDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = getSidebarItems(user);
+    final items = user != null
+        ? getSidebarItems(user)
+        : const [
+            SidebarItem(title: 'Live AI Interview', icon: Icons.videocam_outlined, route: '/live-interview'),
+            SidebarItem(title: 'Browse Jobs', icon: Icons.search_outlined, route: '/jobs'),
+            SidebarItem(title: 'Sign In', icon: Icons.login, route: '/login'),
+            SidebarItem(title: 'Create Account', icon: Icons.person_add_outlined, route: '/register'),
+          ];
 
-    return Drawer(
-      backgroundColor: const Color(0xFF0F1019),
+    return Container(
+      width: double.infinity,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F1019),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(
+          top: BorderSide(color: Color(0xFF2E324D), width: 1.5),
+        ),
+      ),
       child: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Drag handle indicator
+            Center(
+              child: Container(
+                width: 44,
+                height: 4,
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+
+            // Header
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(
                 children: [
                   CircleAvatar(
                     radius: 20,
                     backgroundColor: AppColors.primary,
                     child: Text(
-                      user?.fullName.isNotEmpty ?? false ? user!.fullName[0].toUpperCase() : 'U',
+                      user?.fullName.isNotEmpty ?? false ? user!.fullName[0].toUpperCase() : (user != null ? 'U' : 'G'),
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -173,13 +205,15 @@ class AppMobileDrawer extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          user?.fullName ?? 'TalentAI Member',
+                          user?.fullName ?? 'TalentAI Guest',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                         ),
                         Text(
-                          user?.role == 'RECRUITER' ? 'Recruiter' : 'Candidate',
+                          user != null
+                              ? (user!.isRecruiter ? 'Recruiter Portal' : user!.isCandidate ? 'Candidate Portal' : 'Admin Portal')
+                              : 'Welcome to TalentAI',
                           style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                         ),
                       ],
@@ -187,16 +221,19 @@ class AppMobileDrawer extends StatelessWidget {
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, color: Color(0xFF94A3B8), size: 20),
+                    icon: const Icon(Icons.close, color: Color(0xFF94A3B8), size: 22),
                   ),
                 ],
               ),
             ),
             const Divider(color: Color(0xFF222538), height: 1),
-            const SizedBox(height: 12),
-            Expanded(
+            const SizedBox(height: 10),
+
+            // Navigation Items
+            Flexible(
               child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: items.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 6),
                 itemBuilder: (context, index) {
@@ -208,13 +245,15 @@ class AppMobileDrawer extends StatelessWidget {
                       Navigator.pop(context);
                       context.go(item.route);
                     },
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                       decoration: BoxDecoration(
-                        color: isSelected ? AppColors.primary.withOpacity(0.15) : Colors.transparent,
-                        borderRadius: BorderRadius.circular(10),
-                        border: isSelected ? Border.all(color: AppColors.primary.withOpacity(0.4)) : null,
+                        color: isSelected ? AppColors.primary.withOpacity(0.15) : const Color(0xFF161826),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected ? AppColors.primary.withOpacity(0.4) : const Color(0xFF222538),
+                        ),
                       ),
                       child: Row(
                         children: [
@@ -228,6 +267,8 @@ class AppMobileDrawer extends StatelessWidget {
                               fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                             ),
                           ),
+                          const Spacer(),
+                          const Icon(Icons.chevron_right, size: 16, color: Color(0xFF475569)),
                         ],
                       ),
                     ),
@@ -235,16 +276,25 @@ class AppMobileDrawer extends StatelessWidget {
                 },
               ),
             ),
-            const Divider(color: Color(0xFF222538), height: 1),
-            ListTile(
-              leading: const Icon(Icons.logout, color: AppColors.accentRose),
-              title: const Text('Sign Out', style: TextStyle(color: AppColors.accentRose, fontSize: 13, fontWeight: FontWeight.bold)),
-              onTap: () {
-                Navigator.pop(context);
-                context.go('/login');
-              },
-            ),
-            const SizedBox(height: 10),
+
+            if (user != null) ...[
+              const SizedBox(height: 10),
+              const Divider(color: Color(0xFF222538), height: 1),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: ListTile(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  tileColor: const Color(0xFF1E1422),
+                  leading: const Icon(Icons.logout, color: AppColors.accentRose, size: 20),
+                  title: const Text('Sign Out', style: TextStyle(color: AppColors.accentRose, fontSize: 13, fontWeight: FontWeight.bold)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.go('/login');
+                  },
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
           ],
         ),
       ),

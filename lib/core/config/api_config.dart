@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 class ApiConfig {
   // Production Live Render Backend URL
   static const String liveProductionUrl = 'https://airecruitmentbackend.onrender.com/api';
@@ -75,6 +73,7 @@ class ApiConfig {
   static const String aiAssistant = '/ai/assistant/';
   static const String aiTranslate = '/ai/translate/';
   static const String aiImproveText = '/ai/improve-text/';
+  static const String aiVoiceQuestion = '/ai/voice-question/';
 
   // Admin
   static const String adminDashboard = '/admin/dashboard/';

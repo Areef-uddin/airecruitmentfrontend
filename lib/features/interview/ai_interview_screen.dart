@@ -41,12 +41,15 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   // Room presence & WebRTC signaling
   String _roomId = 'interview_1';
   int? _interviewId;
+  String _myParticipantId = '';
   List<dynamic> _participants = [];
   Map<String, dynamic>? _interviewData;
   Timer? _heartbeatTimer;
   Timer? _signalTimer;
   int _lastSignalId = 0;
   final Set<String> _connectedOrOfferedPeers = {};
+  final Map<String, int> _peerOfferTimestamps = {};
+  String? _pinnedUserId;
   final Map<String, Map<String, bool>> _peerMediaStates = {};
 
   // Real-time In-call chat (Two-way)
@@ -54,6 +57,8 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   final TextEditingController _chatController = TextEditingController();
   bool _isChatOpen = false;
   int _chatTab = 0; // 0 = Room Chat, 1 = AI Copilot Assistant
+  StateSetter? _bottomSheetSetState;
+  bool _isAISpeaking = false;
 
   // AI Copilot direct messages
   final List<Map<String, String>> _aiCopilotMessages = [
@@ -190,17 +195,22 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
 
   void _initMeeting() async {
     final user = ref.read(authProvider).user;
-    final myUserId = user?.id ?? 999;
-    final myName = user?.fullName ?? user?.email ?? 'Guest Participant';
-    final myRole = user?.role ?? 'CANDIDATE';
+    if (_myParticipantId.isEmpty) {
+      final sessionSuffix = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
+      _myParticipantId = user != null ? '${user.id}_$sessionSuffix' : 'guest_$sessionSuffix';
+    }
+    final myName = user?.fullName ?? user?.email ?? 'Participant';
+    final myRole = (user?.isRecruiter == true || user?.role == 'RECRUITER' || user?.role == 'SUPER_ADMIN')
+        ? 'Lead Recruiter'
+        : 'Candidate';
 
     // 1. Initialize WebRTC Media & Signaling Callbacks
     final hasCamera = await _webrtcService.initMedia(
-      myUserId: myUserId.toString(),
+      myUserId: _myParticipantId,
       onSignal: (signalJson, toUser) {
         _interviewRepo.sendSignal(
           room: _roomId,
-          fromUser: myUserId.toString(),
+          fromUser: _myParticipantId,
           toUser: toUser,
           type: 'webrtc',
           payload: signalJson,
@@ -221,6 +231,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     // 3. Join the meeting room presence with initial camera and mic state
     await _interviewRepo.joinRoom(
       _roomId,
+      userId: _myParticipantId,
       role: myRole,
       name: myName,
       videoOn: _isVideoOn,
@@ -232,7 +243,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     // 4. Heartbeat timer (every 3 seconds)
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       _pollRoomStatus();
-      _interviewRepo.sendHeartbeat(_roomId, videoOn: _isVideoOn, micOn: _isMicOn);
+      _interviewRepo.sendHeartbeat(_roomId, userId: _myParticipantId, videoOn: _isVideoOn, micOn: _isMicOn);
     });
 
     // 5. Signaling poll timer (every 1 second)
@@ -280,13 +291,12 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           }
         });
 
-        final user = ref.read(authProvider).user;
-        final myUserId = (user?.id ?? 999).toString();
+        final currentUserId = _myParticipantId;
 
         // Sync media state of active participants
         for (final p in _participants) {
           final pid = p['user_id']?.toString() ?? '';
-          if (pid.isNotEmpty && pid != myUserId) {
+          if (pid.isNotEmpty && pid != currentUserId) {
             if (!_peerMediaStates.containsKey(pid)) {
               _peerMediaStates[pid] = {
                 'video_on': p['video_on'] ?? true,
@@ -298,18 +308,27 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
 
         // Establish WebRTC mesh connections with each participant
         final otherParticipants = _participants
-            .where((p) => (p['user_id']?.toString() ?? '') != myUserId)
+            .where((p) => (p['user_id']?.toString() ?? '') != currentUserId)
             .toList();
 
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
         for (final other in otherParticipants) {
           final otherId = other['user_id']?.toString() ?? '';
-          if (otherId.isNotEmpty && !_connectedOrOfferedPeers.contains(otherId)) {
-            // Deterministic initiator: peer with lexicographically greater ID creates the offer
-            final shouldInitiate = myUserId.compareTo(otherId) > 0;
-            if (shouldInitiate) {
-              _connectedOrOfferedPeers.add(otherId);
-              _webrtcService.createOfferForUser(otherId);
-            }
+          if (otherId.isEmpty) continue;
+
+          final hasStream = _webrtcService.hasRemoteStreamFor(otherId);
+          final lastOfferTime = _peerOfferTimestamps[otherId] ?? 0;
+          final shouldInitiate = currentUserId.compareTo(otherId) > 0;
+
+          // If initiator and stream not active yet, send or retry offer every 5 seconds
+          if (shouldInitiate && !hasStream && (nowMs - lastOfferTime > 5000)) {
+            _peerOfferTimestamps[otherId] = nowMs;
+            _connectedOrOfferedPeers.add(otherId);
+            _webrtcService.createOfferForUser(otherId);
+          } else if (!shouldInitiate && !hasStream && (nowMs - lastOfferTime > 12000)) {
+            // Failsafe: if after 12s no offer arrived, other peer initiates
+            _peerOfferTimestamps[otherId] = nowMs;
+            _webrtcService.createOfferForUser(otherId);
           }
         }
       }
@@ -317,13 +336,10 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   }
 
   void _pollSignals() async {
-    final user = ref.read(authProvider).user;
-    final myUserId = (user?.id ?? 999).toString();
-
     try {
       final signals = await _interviewRepo.getSignals(
         room: _roomId,
-        userId: myUserId,
+        userId: _myParticipantId,
         sinceId: _lastSignalId,
       );
 
@@ -392,12 +408,11 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     }
 
     if (msg['text']?.isNotEmpty ?? false) {
-      if (_chatMessages.isEmpty || _chatMessages.last['text'] != msg['text']) {
-        if (mounted) {
-          setState(() {
-            _chatMessages.add(msg);
-          });
-        }
+      if (mounted) {
+        setState(() {
+          _chatMessages.add(msg);
+        });
+        _bottomSheetSetState?.call(() {});
       }
     }
   }
@@ -415,12 +430,19 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
         if (question.isNotEmpty) _currentAIQuestion = question;
       });
 
+      if (active && question.isNotEmpty) {
+        _speakAIQuestion(question);
+      } else if (!active) {
+        _webrtcService.stopSpeaking();
+        setState(() => _isAISpeaking = false);
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFFD946EF),
           content: Text(active
-              ? '🤖 AI Interviewer (Nora) has taken over this interview session.'
-              : '👤 Recruiter has resumed manual interview control.'),
+              ? '🤖 AI Nora is now asking questions in voice!'
+              : '👤 Manual interviewer mode resumed.'),
         ),
       );
     }
@@ -505,7 +527,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     _subtitleClearTimer?.cancel();
     _recordingTimer?.cancel();
     _typingDebounce?.cancel();
-    _interviewRepo.leaveRoom(_roomId);
+    _interviewRepo.leaveRoom(_roomId, userId: _myParticipantId);
     _webrtcService.dispose();
     _chatController.dispose();
     _copilotController.dispose();
@@ -525,18 +547,16 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   }
 
   void _broadcastMediaState() {
-    final user = ref.read(authProvider).user;
-    final myUserId = (user?.id ?? 999).toString();
     _interviewRepo.sendSignal(
       room: _roomId,
-      fromUser: myUserId,
+      fromUser: _myParticipantId,
       type: 'media_state',
       payload: {
         'video_on': _isVideoOn,
         'mic_on': _isMicOn,
       },
     );
-    _interviewRepo.sendHeartbeat(_roomId, videoOn: _isVideoOn, micOn: _isMicOn);
+    _interviewRepo.sendHeartbeat(_roomId, userId: _myParticipantId, videoOn: _isVideoOn, micOn: _isMicOn);
   }
 
   void _toggleScreenShare() async {
@@ -589,12 +609,23 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     );
   }
 
+  void _speakAIQuestion(String question) {
+    if (question.trim().isEmpty) return;
+    if (mounted) {
+      setState(() => _isAISpeaking = true);
+    }
+    _webrtcService.speakText(question);
+    final durationMs = (question.length * 75).clamp(3000, 15000);
+    Timer(Duration(milliseconds: durationMs), () {
+      if (mounted) setState(() => _isAISpeaking = false);
+    });
+  }
+
   void _sendMessage({String? customText}) {
     final text = (customText ?? _chatController.text).trim();
     if (text.isEmpty) return;
 
     final user = ref.read(authProvider).user;
-    final myUserId = (user?.id ?? 999).toString();
     final senderName = user?.fullName ?? user?.email ?? 'Me';
     final timeStr = '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}';
 
@@ -609,10 +640,12 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       _chatController.clear();
       _suggestedPhrases.clear();
     });
+    _bottomSheetSetState?.call(() {});
 
     _interviewRepo.sendSignal(
       room: _roomId,
-      fromUser: myUserId,
+      fromUser: _myParticipantId,
+      toUser: '',
       type: 'chat',
       payload: msg,
     );
@@ -634,6 +667,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       _copilotController.clear();
       _isCopilotThinking = true;
     });
+    _bottomSheetSetState?.call(() {});
 
     try {
       final reply = await _interviewRepo.askAssistant(query, role: role);
@@ -646,6 +680,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           });
           _isCopilotThinking = false;
         });
+        _bottomSheetSetState?.call(() {});
       }
     } catch (_) {
       if (mounted) {
@@ -657,6 +692,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           });
           _isCopilotThinking = false;
         });
+        _bottomSheetSetState?.call(() {});
       }
     }
   }
@@ -672,6 +708,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     _interviewRepo.sendSignal(
       room: _roomId,
       fromUser: myUserId,
+      toUser: '',
       type: 'ai_mode',
       payload: {
         'active': _isAIModeActive,
@@ -679,39 +716,74 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       },
     );
 
+    if (_isAIModeActive) {
+      _sendMessage(customText: '[AI Interviewer Nora 🎙️]: $_currentAIQuestion');
+      _speakAIQuestion(_currentAIQuestion);
+    } else {
+      _webrtcService.stopSpeaking();
+      setState(() => _isAISpeaking = false);
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: const Color(0xFFD946EF),
         content: Text(_isAIModeActive
-            ? '🤖 Handed over to AI Nora! Nora is now asking interview questions.'
+            ? '🤖 Handed over to AI Nora! Nora is now asking interview questions in voice.'
             : '👤 Resumed manual recruiter interview control.'),
       ),
     );
   }
 
-  void _nextAIQuestion() {
+  void _nextAIQuestion() async {
     final user = ref.read(authProvider).user;
     final myUserId = (user?.id ?? 999).toString();
 
     setState(() {
-      _currentAIQuestionIdx = (_currentAIQuestionIdx + 1) % _aiQuestions.length;
+      _currentAIQuestionIdx = _currentAIQuestionIdx + 1;
     });
+
+    String nextQ = '';
+    try {
+      final jobTitle = _interviewData?['job_title']?.toString() ?? 'Full-Stack Software Engineer';
+      final dynamicQuestion = await _interviewRepo.getVoiceInterviewQuestion(
+        jobTitle: jobTitle,
+        round: _currentAIQuestionIdx + 1,
+        candidateName: _interviewData?['candidate_name']?.toString(),
+      );
+      if (dynamicQuestion.isNotEmpty) {
+        nextQ = dynamicQuestion;
+      }
+    } catch (_) {}
+
+    if (nextQ.isEmpty) {
+      nextQ = _aiQuestions[_currentAIQuestionIdx % _aiQuestions.length];
+    }
+
+    if (mounted) {
+      setState(() {
+        _currentAIQuestion = nextQ;
+      });
+    }
 
     _interviewRepo.sendSignal(
       room: _roomId,
       fromUser: myUserId,
+      toUser: '',
       type: 'ai_mode',
       payload: {
         'active': true,
-        'question': _currentAIQuestion,
+        'question': nextQ,
       },
     );
 
-    // Also inject question into in-room chat
-    _sendMessage(customText: '[AI Interviewer Nora]: $_currentAIQuestion');
+    // Announce in chat
+    _sendMessage(customText: '[AI Interviewer Nora 🎙️]: $nextQ');
+
+    // Speak aloud using voice!
+    _speakAIQuestion(nextQ);
   }
 
-  String get _currentAIQuestion => _activeQuestionText.isNotEmpty ? _activeQuestionText : _aiQuestions[_currentAIQuestionIdx];
+  String get _currentAIQuestion => _activeQuestionText.isNotEmpty ? _activeQuestionText : _aiQuestions[_currentAIQuestionIdx % _aiQuestions.length];
   set _currentAIQuestion(String val) => _activeQuestionText = val;
 
   void _toggleRecording() {
@@ -957,13 +1029,10 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   }
 
   void _endMeetingForAll() {
-    final user = ref.read(authProvider).user;
-    final myUserId = (user?.id ?? 999).toString();
-
     // Broadcast meeting ended signal to room
     _interviewRepo.sendSignal(
       room: _roomId,
-      fromUser: myUserId,
+      fromUser: _myParticipantId,
       type: 'meeting_ended',
       payload: {'reason': 'Session ended by host recruiter'},
     );
@@ -981,13 +1050,16 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) {
+          _bottomSheetSetState = setSheetState;
           return FractionallySizedBox(
             heightFactor: 0.85,
             child: _buildChatAndCopilotPanel(isModal: true, onStateUpdate: () => setSheetState(() {})),
           );
         },
       ),
-    );
+    ).whenComplete(() {
+      _bottomSheetSetState = null;
+    });
   }
 
   @override
@@ -997,7 +1069,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     final isHost = user?.isRecruiter == true || user?.role == 'RECRUITER' || user?.role == 'SUPER_ADMIN';
 
     // Identify participants from presence list
-    final currentUserId = (user?.id ?? 999).toString();
+    final currentUserId = _myParticipantId.isNotEmpty ? _myParticipantId : (user?.id ?? 999).toString();
     final otherParticipants = _participants
         .where((p) => (p['user_id']?.toString() ?? '') != currentUserId)
         .toList();
@@ -1272,6 +1344,25 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
                                     ],
                                   ),
                                 ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: _isAISpeaking ? const Color(0xFF10B981).withOpacity(0.2) : Colors.white10,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: _isAISpeaking ? const Color(0xFF10B981) : Colors.white24,
+                                    ),
+                                  ),
+                                  child: IconButton(
+                                    icon: Icon(
+                                      _isAISpeaking ? Icons.volume_up : Icons.volume_up_outlined,
+                                      size: 18,
+                                      color: _isAISpeaking ? const Color(0xFF10B981) : Colors.white,
+                                    ),
+                                    tooltip: _isAISpeaking ? 'Nora Speaking... (tap to replay)' : 'Hear AI Voice Question',
+                                    onPressed: () => _speakAIQuestion(_currentAIQuestion),
+                                  ),
+                                ),
                                 if (isHost) ...[
                                   const SizedBox(width: 8),
                                   ElevatedButton.icon(
@@ -1281,7 +1372,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
-                                    icon: const Icon(Icons.skip_next, size: 14),
+                                    icon: const Icon(Icons.auto_awesome, size: 14),
                                     label: const Text('Next Q', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                   ),
                                 ],
@@ -1862,49 +1953,76 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   }
 
   Widget _buildLocalTile(String myName, String myRole) {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: _webrtcService.buildVideoView(
-              isLocal: true,
-              isVideoOn: _isVideoOn,
-              userName: myName,
-              userRole: myRole,
-            ),
-          ),
+    final isSpeaking = _isMicOn;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isSpeaking ? const Color(0xFF10B981) : const Color(0xFF2E324D),
+          width: isSpeaking ? 2.5 : 1.2,
         ),
-        Positioned(
-          top: 12,
-          left: 12,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.65),
-              borderRadius: BorderRadius.circular(8),
+        boxShadow: isSpeaking
+            ? [BoxShadow(color: const Color(0xFF10B981).withOpacity(0.35), blurRadius: 16, spreadRadius: 1)]
+            : [],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: _webrtcService.buildVideoView(
+                isLocal: true,
+                isVideoOn: _isVideoOn,
+                userName: myName,
+                userRole: myRole,
+              ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('$myName ($myRole)', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                const SizedBox(width: 6),
-                Icon(_isMicOn ? Icons.mic : Icons.mic_off, size: 13, color: _isMicOn ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
-              ],
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.75),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white.withOpacity(0.12)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: _isMicOn ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('$myName ($myRole)', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 6),
+                    Icon(_isMicOn ? Icons.mic : Icons.mic_off, size: 13, color: _isMicOn ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
+                    if (_isMicOn) ...[
+                      const SizedBox(width: 4),
+                      _buildSpeakingAudioWave(true),
+                    ],
+                  ],
+                ),
+              ),
             ),
-          ),
+            if (_isScreenSharing)
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(6)),
+                  child: const Text('Sharing Screen', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+              ),
+          ],
         ),
-        if (_isScreenSharing)
-          Positioned(
-            top: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(6)),
-              child: const Text('Sharing Screen', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-            ),
-          ),
-      ],
+      ),
     );
   }
 
@@ -1928,13 +2046,14 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
             )
           : Column(
               children: [
-                Expanded(flex: 3, child: _buildWaitingTile(isHost: isHost, remoteName: defaultRemoteName)),
+                Expanded(flex: 1, child: _buildWaitingTile(isHost: isHost, remoteName: defaultRemoteName)),
                 const SizedBox(height: 10),
-                Expanded(flex: 2, child: _buildLocalTile(myName, myRole)),
+                Expanded(flex: 1, child: _buildLocalTile(myName, myRole)),
               ],
             );
     }
 
+    // 1-on-1 Interview (1 Remote + 1 Local)
     if (otherParticipants.length == 1) {
       final remote = otherParticipants.first;
       final remoteId = remote['user_id']?.toString() ?? 'remote_1';
@@ -1962,7 +2081,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           : Column(
               children: [
                 Expanded(
-                  flex: 3,
+                  flex: 1,
                   child: _buildRemoteParticipantTile(
                     userId: remoteId,
                     name: remoteName,
@@ -1972,13 +2091,99 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                Expanded(flex: 2, child: _buildLocalTile(myName, myRole)),
+                Expanded(flex: 1, child: _buildLocalTile(myName, myRole)),
               ],
             );
     }
 
-    // Multi-Party Mesh Video Grid (Local + All Remote Participants)
-    final tiles = <Widget>[
+    // Pinned Participant Spotlight View
+    if (_pinnedUserId != null) {
+      final pinnedParticipant = otherParticipants.firstWhere(
+        (p) => (p['user_id']?.toString() ?? '') == _pinnedUserId,
+        orElse: () => null,
+      );
+
+      if (pinnedParticipant != null) {
+        final pid = pinnedParticipant['user_id']?.toString() ?? '';
+        final pname = pinnedParticipant['name']?.toString() ?? 'Participant';
+        final prole = pinnedParticipant['role']?.toString() ?? 'Participant';
+        final pVideoOn = _peerMediaStates[pid]?['video_on'] ?? pinnedParticipant['video_on'] ?? true;
+        final pMicOn = _peerMediaStates[pid]?['mic_on'] ?? pinnedParticipant['mic_on'] ?? true;
+
+        final thumbnails = <Widget>[
+          _buildLocalTile(myName, myRole),
+        ];
+
+        for (final p in otherParticipants) {
+          final id = p['user_id']?.toString() ?? '';
+          if (id != _pinnedUserId) {
+            thumbnails.add(
+              _buildRemoteParticipantTile(
+                userId: id,
+                name: p['name']?.toString() ?? 'Participant',
+                role: p['role']?.toString() ?? 'Participant',
+                isVideoOn: _peerMediaStates[id]?['video_on'] ?? p['video_on'] ?? true,
+                isMicOn: _peerMediaStates[id]?['mic_on'] ?? p['mic_on'] ?? true,
+              ),
+            );
+          }
+        }
+
+        return isDesktop
+            ? Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: _buildRemoteParticipantTile(
+                      userId: pid,
+                      name: pname,
+                      role: prole,
+                      isVideoOn: pVideoOn,
+                      isMicOn: pMicOn,
+                      isPinned: true,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 250,
+                    child: ListView.separated(
+                      itemCount: thumbnails.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, idx) => SizedBox(height: 150, child: thumbnails[idx]),
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: _buildRemoteParticipantTile(
+                      userId: pid,
+                      name: pname,
+                      role: prole,
+                      isVideoOn: pVideoOn,
+                      isMicOn: pMicOn,
+                      isPinned: true,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 110,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: thumbnails.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, idx) => SizedBox(width: 150, child: thumbnails[idx]),
+                    ),
+                  ),
+                ],
+              );
+      }
+    }
+
+    // Multi-User Grid: 3 or 4 users (2x2 Balanced Split that fills 100% height without scrolling)
+    final allTiles = <Widget>[
       _buildLocalTile(myName, myRole),
     ];
 
@@ -1989,7 +2194,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       final pVideoOn = _peerMediaStates[pid]?['video_on'] ?? p['video_on'] ?? true;
       final pMicOn = _peerMediaStates[pid]?['mic_on'] ?? p['mic_on'] ?? true;
 
-      tiles.add(
+      allTiles.add(
         _buildRemoteParticipantTile(
           userId: pid,
           name: pname,
@@ -2000,17 +2205,165 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       );
     }
 
-    final cols = isDesktop ? (tiles.length <= 4 ? 2 : 3) : (tiles.length <= 2 ? 1 : 2);
+    // 3 users: 2 on top, 1 centered below (like Google Meet)
+    if (allTiles.length == 3) {
+      return isDesktop
+          ? Column(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Expanded(child: allTiles[0]),
+                      const SizedBox(width: 12),
+                      Expanded(child: allTiles[1]),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Spacer(flex: 1),
+                      Expanded(flex: 2, child: allTiles[2]),
+                      const Spacer(flex: 1),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              children: [
+                Expanded(flex: 3, child: allTiles[0]),
+                const SizedBox(height: 10),
+                Expanded(
+                  flex: 2,
+                  child: Row(
+                    children: [
+                      Expanded(child: allTiles[1]),
+                      const SizedBox(width: 10),
+                      Expanded(child: allTiles[2]),
+                    ],
+                  ),
+                ),
+              ],
+            );
+    }
 
+    // 4 users: Balanced 2x2 grid filling 100% height
+    if (allTiles.length == 4) {
+      return Column(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(child: allTiles[0]),
+                const SizedBox(width: 12),
+                Expanded(child: allTiles[1]),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(child: allTiles[2]),
+                const SizedBox(width: 12),
+                Expanded(child: allTiles[3]),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // 5 or 6 participants: 3x2 grid
+    if (allTiles.length <= 6) {
+      final topCount = (allTiles.length / 2).ceil();
+      final topTiles = allTiles.take(topCount).toList();
+      final bottomTiles = allTiles.skip(topCount).toList();
+
+      return isDesktop
+          ? Column(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: topTiles
+                        .map((t) => Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                child: t,
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Row(
+                    children: bottomTiles
+                        .map((t) => Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                child: t,
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
+              ],
+            )
+          : GridView.builder(
+              physics: const BouncingScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 1.25,
+              ),
+              itemCount: allTiles.length,
+              itemBuilder: (ctx, idx) => allTiles[idx],
+            );
+    }
+
+    // 7+ participants: Responsive gallery
+    final cols = isDesktop ? 3 : 2;
     return GridView.builder(
+      physics: const BouncingScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: cols,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: isDesktop ? (tiles.length <= 4 ? 1.45 : 1.35) : 1.25,
+        childAspectRatio: isDesktop ? 1.4 : 1.2,
       ),
-      itemCount: tiles.length,
-      itemBuilder: (ctx, idx) => tiles[idx],
+      itemCount: allTiles.length,
+      itemBuilder: (ctx, idx) => allTiles[idx],
+    );
+  }
+
+  Widget _buildSpeakingAudioWave(bool isSpeaking) {
+    if (!isSpeaking) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 3,
+          height: 8,
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          decoration: BoxDecoration(color: const Color(0xFF10B981), borderRadius: BorderRadius.circular(2)),
+        ),
+        Container(
+          width: 3,
+          height: 12,
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          decoration: BoxDecoration(color: const Color(0xFF10B981), borderRadius: BorderRadius.circular(2)),
+        ),
+        Container(
+          width: 3,
+          height: 6,
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          decoration: BoxDecoration(color: const Color(0xFF10B981), borderRadius: BorderRadius.circular(2)),
+        ),
+      ],
     );
   }
 
@@ -2020,63 +2373,117 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     required String role,
     required bool isVideoOn,
     required bool isMicOn,
+    bool isPinned = false,
   }) {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: _webrtcService.buildVideoView(
-              isLocal: false,
-              isVideoOn: isVideoOn,
-              userName: name,
-              userRole: role,
-              userId: userId,
-            ),
-          ),
+    final isSpeaking = isMicOn;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isSpeaking ? const Color(0xFF10B981) : (isPinned ? const Color(0xFFD946EF) : const Color(0xFF2E324D)),
+          width: isSpeaking ? 2.5 : (isPinned ? 2.0 : 1.2),
         ),
-        Positioned(
-          top: 12,
-          left: 12,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: Colors.black.withOpacity(0.65), borderRadius: BorderRadius.circular(8)),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(width: 7, height: 7, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                Text('$name ($role)', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                const SizedBox(width: 6),
-                Icon(
-                  isMicOn ? Icons.mic : Icons.mic_off,
-                  size: 13,
-                  color: isMicOn ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+        boxShadow: isSpeaking
+            ? [BoxShadow(color: const Color(0xFF10B981).withOpacity(0.35), blurRadius: 16, spreadRadius: 1)]
+            : (isPinned ? [BoxShadow(color: const Color(0xFFD946EF).withOpacity(0.25), blurRadius: 10)] : []),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: _webrtcService.buildVideoView(
+                isLocal: false,
+                isVideoOn: isVideoOn,
+                userName: name,
+                userRole: role,
+                userId: userId,
+              ),
+            ),
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.75),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white.withOpacity(0.12)),
                 ),
-              ],
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: 12,
-          left: 12,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(6)),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.wifi, size: 12, color: Color(0xFF10B981)),
-                const SizedBox(width: 4),
-                Text(
-                  isVideoOn ? 'Live Video • Voice Active' : 'Camera Off • Voice Active',
-                  style: const TextStyle(color: Color(0xFF10B981), fontSize: 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: isMicOn ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('$name ($role)', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 6),
+                    Icon(
+                      isMicOn ? Icons.mic : Icons.mic_off,
+                      size: 13,
+                      color: isMicOn ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                    ),
+                    if (isMicOn) ...[
+                      const SizedBox(width: 4),
+                      _buildSpeakingAudioWave(true),
+                    ],
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+            // Pin / Spotlight button
+            Positioned(
+              top: 10,
+              right: 10,
+              child: InkWell(
+                onTap: () {
+                  setState(() {
+                    _pinnedUserId = (_pinnedUserId == userId) ? null : userId;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: _pinnedUserId == userId ? const Color(0xFFD946EF) : Colors.black.withOpacity(0.65),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.white.withOpacity(0.15)),
+                  ),
+                  child: Icon(
+                    _pinnedUserId == userId ? Icons.push_pin : Icons.push_pin_outlined,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: Colors.black.withOpacity(0.65), borderRadius: BorderRadius.circular(6)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.wifi, size: 12, color: Color(0xFF10B981)),
+                    const SizedBox(width: 4),
+                    Text(
+                      isVideoOn ? 'Live Video • Voice Active' : 'Camera Off • Voice Active',
+                      style: const TextStyle(color: Color(0xFF10B981), fontSize: 10),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 

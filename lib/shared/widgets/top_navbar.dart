@@ -202,7 +202,7 @@ class TopNavbar extends ConsumerWidget {
       child: Row(
         children: [
           // Mobile Hamburger Menu
-          if (!isDesktop && user != null) ...[
+          if (!isDesktop) ...[
             IconButton(
               icon: const Icon(Icons.menu, color: Colors.white, size: 24),
               tooltip: 'Navigation Menu',
@@ -252,17 +252,6 @@ class TopNavbar extends ConsumerWidget {
               ],
             ),
           ),
-
-          if (isDesktop) ...[
-            const SizedBox(width: 36),
-            _NavLink(title: 'Features', onTap: () => context.go('/')),
-            const SizedBox(width: 20),
-            _NavLink(title: 'Live AI Demo', onTap: () => context.go('/live-interview')),
-            const SizedBox(width: 20),
-            _NavLink(title: 'Browse Jobs', onTap: () => context.go('/jobs')),
-            const SizedBox(width: 20),
-            _NavLink(title: 'Solutions', onTap: () => context.go('/')),
-          ],
 
           const Spacer(),
 
@@ -436,32 +425,6 @@ class TopNavbar extends ConsumerWidget {
               ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _NavLink extends StatelessWidget {
-  final String title;
-  final VoidCallback onTap;
-
-  const _NavLink({required this.title, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        child: Text(
-          title,
-          style: AppTypography.bodyMedium.copyWith(
-            color: AppColors.textSecondary,
-            fontWeight: FontWeight.w500,
-            fontSize: 13,
-          ),
-        ),
       ),
     );
   }
