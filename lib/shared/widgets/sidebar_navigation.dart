@@ -147,14 +147,16 @@ class AppMobileDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = user != null
-        ? getSidebarItems(user)
-        : const [
-            SidebarItem(title: 'Live AI Interview', icon: Icons.videocam_outlined, route: '/live-interview'),
-            SidebarItem(title: 'Browse Jobs', icon: Icons.search_outlined, route: '/jobs'),
-            SidebarItem(title: 'Sign In', icon: Icons.login, route: '/login'),
-            SidebarItem(title: 'Create Account', icon: Icons.person_add_outlined, route: '/register'),
-          ];
+    final items = getSidebarItems(user);
+
+    final isGuest = user == null;
+    final guestItems = const [
+      SidebarItem(title: 'Live AI Demo', icon: Icons.videocam_outlined, route: '/live-interview'),
+      SidebarItem(title: 'Browse Jobs', icon: Icons.work_outline, route: '/jobs'),
+      SidebarItem(title: 'Sign In', icon: Icons.login, route: '/login'),
+      SidebarItem(title: 'Create Account', icon: Icons.person_add_outlined, route: '/register'),
+    ];
+    final displayItems = isGuest ? guestItems : items;
 
     return Container(
       width: double.infinity,
@@ -163,30 +165,29 @@ class AppMobileDrawer extends StatelessWidget {
       ),
       decoration: const BoxDecoration(
         color: Color(0xFF0F1019),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         border: Border(
-          top: BorderSide(color: Color(0xFF2E324D), width: 1.5),
+          top: BorderSide(color: Color(0xFF222538), width: 1.5),
         ),
       ),
       child: SafeArea(
+        top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Drag handle indicator
+            // Top drag handle
             Center(
               child: Container(
-                width: 44,
-                height: 4,
                 margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 40,
+                height: 4,
                 decoration: BoxDecoration(
                   color: Colors.white24,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-
-            // Header
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(
@@ -195,7 +196,7 @@ class AppMobileDrawer extends StatelessWidget {
                     radius: 20,
                     backgroundColor: AppColors.primary,
                     child: Text(
-                      user?.fullName.isNotEmpty ?? false ? user!.fullName[0].toUpperCase() : (user != null ? 'U' : 'G'),
+                      user?.fullName.isNotEmpty ?? false ? user!.fullName[0].toUpperCase() : (isGuest ? 'G' : 'U'),
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -205,15 +206,15 @@ class AppMobileDrawer extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          user?.fullName ?? 'TalentAI Guest',
+                          user?.fullName ?? (isGuest ? 'Guest Visitor' : 'TalentAI Member'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                         ),
                         Text(
-                          user != null
-                              ? (user!.isRecruiter ? 'Recruiter Portal' : user!.isCandidate ? 'Candidate Portal' : 'Admin Portal')
-                              : 'Welcome to TalentAI',
+                          isGuest
+                              ? 'Explore TalentAI'
+                              : (user?.role == 'RECRUITER' ? 'Recruiter' : user?.role == 'SUPER_ADMIN' ? 'Admin' : 'Candidate'),
                           style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                         ),
                       ],
@@ -221,23 +222,21 @@ class AppMobileDrawer extends StatelessWidget {
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, color: Color(0xFF94A3B8), size: 22),
+                    icon: const Icon(Icons.close, color: Color(0xFF94A3B8), size: 20),
                   ),
                 ],
               ),
             ),
             const Divider(color: Color(0xFF222538), height: 1),
-            const SizedBox(height: 10),
-
-            // Navigation Items
+            const SizedBox(height: 8),
             Flexible(
               child: ListView.separated(
                 shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: items.length,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                itemCount: displayItems.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 6),
                 itemBuilder: (context, index) {
-                  final item = items[index];
+                  final item = displayItems[index];
                   final isSelected = currentRoute.startsWith(item.route) && item.route != '/';
 
                   return InkWell(
@@ -245,15 +244,13 @@ class AppMobileDrawer extends StatelessWidget {
                       Navigator.pop(context);
                       context.go(item.route);
                     },
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: isSelected ? AppColors.primary.withOpacity(0.15) : const Color(0xFF161826),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isSelected ? AppColors.primary.withOpacity(0.4) : const Color(0xFF222538),
-                        ),
+                        color: isSelected ? AppColors.primary.withOpacity(0.15) : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        border: isSelected ? Border.all(color: AppColors.primary.withOpacity(0.4)) : null,
                       ),
                       child: Row(
                         children: [
@@ -267,8 +264,6 @@ class AppMobileDrawer extends StatelessWidget {
                               fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                             ),
                           ),
-                          const Spacer(),
-                          const Icon(Icons.chevron_right, size: 16, color: Color(0xFF475569)),
                         ],
                       ),
                     ),
@@ -276,25 +271,18 @@ class AppMobileDrawer extends StatelessWidget {
                 },
               ),
             ),
-
-            if (user != null) ...[
-              const SizedBox(height: 10),
+            if (!isGuest) ...[
               const Divider(color: Color(0xFF222538), height: 1),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  tileColor: const Color(0xFF1E1422),
-                  leading: const Icon(Icons.logout, color: AppColors.accentRose, size: 20),
-                  title: const Text('Sign Out', style: TextStyle(color: AppColors.accentRose, fontSize: 13, fontWeight: FontWeight.bold)),
-                  onTap: () {
-                    Navigator.pop(context);
-                    context.go('/login');
-                  },
-                ),
+              ListTile(
+                leading: const Icon(Icons.logout, color: AppColors.accentRose),
+                title: const Text('Sign Out', style: TextStyle(color: AppColors.accentRose, fontSize: 13, fontWeight: FontWeight.bold)),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.go('/login');
+                },
               ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
           ],
         ),
       ),

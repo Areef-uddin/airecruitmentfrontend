@@ -206,14 +206,28 @@ class TopNavbar extends ConsumerWidget {
             IconButton(
               icon: const Icon(Icons.menu, color: Colors.white, size: 24),
               tooltip: 'Navigation Menu',
+              padding: const EdgeInsets.all(6),
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               onPressed: () => _openMobileMenu(context, user),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 8),
           ],
 
           // Brand Logo: "nxus"
           InkWell(
-            onTap: () => context.go('/'),
+            onTap: () {
+              if (user != null) {
+                if (user.isCandidate) {
+                  context.go('/candidate/dashboard');
+                } else if (user.isRecruiter) {
+                  context.go('/recruiter/dashboard');
+                } else {
+                  context.go('/admin/dashboard');
+                }
+              } else {
+                context.go('/');
+              }
+            },
             borderRadius: BorderRadius.circular(8),
             child: Row(
               mainAxisSize: MainAxisSize.min,

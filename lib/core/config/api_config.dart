@@ -57,6 +57,7 @@ class ApiConfig {
   static const String interviewRoomHeartbeat = '/interviews/room-heartbeat/';
   static const String interviewRoomLeave = '/interviews/room-leave/';
   static const String interviewSignal = '/interviews/signal/';
+  static const String interviewRoomChat = '/interviews/room-chat/';
 
   // Notifications
   static const String notifications = '/notifications/';
@@ -73,7 +74,6 @@ class ApiConfig {
   static const String aiAssistant = '/ai/assistant/';
   static const String aiTranslate = '/ai/translate/';
   static const String aiImproveText = '/ai/improve-text/';
-  static const String aiVoiceQuestion = '/ai/voice-question/';
 
   // Admin
   static const String adminDashboard = '/admin/dashboard/';

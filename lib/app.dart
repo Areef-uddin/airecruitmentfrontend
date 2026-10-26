@@ -8,7 +8,7 @@ class TalentAIApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final router = ref.watch(appRouterProvider);
+    final router = ref.watch(routerProvider);
 
     return MaterialApp.router(
       title: 'TalentAI (Nxsus) • AI-First Recruitment Platform',

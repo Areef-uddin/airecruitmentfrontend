@@ -6,11 +6,47 @@ import '../../core/responsive/responsive_layout.dart';
 import '../../shared/widgets/top_navbar.dart';
 import '../../shared/widgets/app_button.dart';
 
-class LandingScreen extends StatelessWidget {
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/auth_provider.dart';
+
+class LandingScreen extends ConsumerStatefulWidget {
   const LandingScreen({super.key});
 
   @override
+  ConsumerState<LandingScreen> createState() => _LandingScreenState();
+}
+
+class _LandingScreenState extends ConsumerState<LandingScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final user = ref.read(authProvider).user;
+      if (user != null && mounted) {
+        if (user.isCandidate) {
+          context.go('/candidate/dashboard');
+        } else if (user.isRecruiter) {
+          context.go('/recruiter/dashboard');
+        } else {
+          context.go('/admin/dashboard');
+        }
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider);
+    final user = authState.user;
+    if (user != null) {
+      // While redirecting or if already logged in, show clean loader or redirect immediately
+      return const Scaffold(
+        backgroundColor: AppColors.background,
+        body: Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+      );
+    }
     final isDesktop = ResponsiveLayout.isDesktop(context);
 
     return Scaffold(

@@ -21,15 +21,15 @@ class RecruiterCreateJobScreen extends ConsumerStatefulWidget {
 }
 
 class _RecruiterCreateJobScreenState extends ConsumerState<RecruiterCreateJobScreen> {
-  final _titleController = TextEditingController(text: 'Staff Machine Learning Engineer');
-  final _locationController = TextEditingController(text: 'San Francisco, CA / Remote');
-  final _minSalaryController = TextEditingController(text: '180000');
-  final _maxSalaryController = TextEditingController(text: '225000');
+  final _titleController = TextEditingController();
+  final _locationController = TextEditingController();
+  final _minSalaryController = TextEditingController();
+  final _maxSalaryController = TextEditingController();
   final _descController = TextEditingController();
   final _respController = TextEditingController();
   final _reqController = TextEditingController();
   final _benefitsController = TextEditingController();
-  final _skillsController = TextEditingController(text: 'Python, PyTorch, Docker, Kubernetes, LLM Fine-tuning');
+  final _skillsController = TextEditingController();
 
   String _workplaceType = 'REMOTE';
   String _jobType = 'FULL_TIME';

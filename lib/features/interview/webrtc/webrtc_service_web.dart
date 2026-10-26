@@ -368,35 +368,7 @@ class WebRTCWebServiceImpl implements WebRTCService {
   }
 
   @override
-  void speakText(String text, {String? lang}) {
-    if (text.trim().isEmpty) return;
-    try {
-      stopSpeaking();
-      final utterance = html.SpeechSynthesisUtterance(text);
-      utterance.lang = lang ?? 'en-US';
-      utterance.rate = 1.0;
-      utterance.pitch = 1.05;
-      html.window.speechSynthesis?.speak(utterance);
-    } catch (_) {
-      try {
-        final jsEscaped = text.replaceAll('"', '\\"').replaceAll('\n', ' ');
-        js.context.callMethod('eval', [
-          'if (window.speechSynthesis) { window.speechSynthesis.cancel(); var u = new SpeechSynthesisUtterance("$jsEscaped"); u.rate = 1.0; window.speechSynthesis.speak(u); }'
-        ]);
-      } catch (_) {}
-    }
-  }
-
-  @override
-  void stopSpeaking() {
-    try {
-      html.window.speechSynthesis?.cancel();
-    } catch (_) {}
-  }
-
-  @override
   void dispose() {
-    stopSpeaking();
     stopSpeechRecognition();
     stopScreenShare();
     try {

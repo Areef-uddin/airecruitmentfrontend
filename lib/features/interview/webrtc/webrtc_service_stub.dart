@@ -24,8 +24,6 @@ abstract class WebRTCService {
   void stopScreenShare();
   void startSpeechRecognition({required String targetLang, required Function(String text, String translated) onResult});
   void stopSpeechRecognition();
-  void speakText(String text, {String? lang});
-  void stopSpeaking();
   bool get hasRemoteStream;
   bool hasRemoteStreamFor(String userId);
   void dispose();
@@ -103,12 +101,6 @@ class WebRTCServiceImpl implements WebRTCService {
 
   @override
   void stopSpeechRecognition() {}
-
-  @override
-  void speakText(String text, {String? lang}) {}
-
-  @override
-  void stopSpeaking() {}
 
   @override
   void dispose() {}

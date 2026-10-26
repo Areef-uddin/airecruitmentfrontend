@@ -57,8 +57,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   final TextEditingController _chatController = TextEditingController();
   bool _isChatOpen = false;
   int _chatTab = 0; // 0 = Room Chat, 1 = AI Copilot Assistant
-  StateSetter? _bottomSheetSetState;
-  bool _isAISpeaking = false;
 
   // AI Copilot direct messages
   final List<Map<String, String>> _aiCopilotMessages = [
@@ -255,6 +253,9 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _callSeconds++);
     });
+
+    // 7. Load room meeting chat history
+    _loadRoomChatHistory();
   }
 
   void _startCaptions() {
@@ -386,6 +387,22 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     }
   }
 
+  void _loadRoomChatHistory() async {
+    try {
+      final history = await _interviewRepo.getRoomChat(_roomId);
+      if (mounted && history.isNotEmpty) {
+        setState(() {
+          for (final h in history) {
+            final exists = _chatMessages.any((m) => m['text'] == h['text'] && m['time'] == h['time']);
+            if (!exists) {
+              _chatMessages.add(h);
+            }
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
   void _handleIncomingChatMessage(dynamic payload) {
     Map<String, String> msg = {};
     if (payload is Map) {
@@ -408,11 +425,11 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     }
 
     if (msg['text']?.isNotEmpty ?? false) {
-      if (mounted) {
+      final exists = _chatMessages.any((m) => m['text'] == msg['text'] && m['time'] == msg['time']);
+      if (!exists && mounted) {
         setState(() {
           _chatMessages.add(msg);
         });
-        _bottomSheetSetState?.call(() {});
       }
     }
   }
@@ -430,19 +447,12 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
         if (question.isNotEmpty) _currentAIQuestion = question;
       });
 
-      if (active && question.isNotEmpty) {
-        _speakAIQuestion(question);
-      } else if (!active) {
-        _webrtcService.stopSpeaking();
-        setState(() => _isAISpeaking = false);
-      }
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFFD946EF),
           content: Text(active
-              ? '🤖 AI Nora is now asking questions in voice!'
-              : '👤 Manual interviewer mode resumed.'),
+              ? '🤖 AI Interviewer (Nora) has taken over this interview session.'
+              : '👤 Recruiter has resumed manual interview control.'),
         ),
       );
     }
@@ -609,18 +619,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     );
   }
 
-  void _speakAIQuestion(String question) {
-    if (question.trim().isEmpty) return;
-    if (mounted) {
-      setState(() => _isAISpeaking = true);
-    }
-    _webrtcService.speakText(question);
-    final durationMs = (question.length * 75).clamp(3000, 15000);
-    Timer(Duration(milliseconds: durationMs), () {
-      if (mounted) setState(() => _isAISpeaking = false);
-    });
-  }
-
   void _sendMessage({String? customText}) {
     final text = (customText ?? _chatController.text).trim();
     if (text.isEmpty) return;
@@ -640,14 +638,21 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       _chatController.clear();
       _suggestedPhrases.clear();
     });
-    _bottomSheetSetState?.call(() {});
 
     _interviewRepo.sendSignal(
       room: _roomId,
       fromUser: _myParticipantId,
-      toUser: '',
+      toUser: 'all',
       type: 'chat',
       payload: msg,
+    );
+
+    _interviewRepo.sendRoomChatMessage(
+      room: _roomId,
+      sender: senderName,
+      text: text,
+      fromUser: _myParticipantId,
+      time: timeStr,
     );
   }
 
@@ -667,7 +672,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       _copilotController.clear();
       _isCopilotThinking = true;
     });
-    _bottomSheetSetState?.call(() {});
 
     try {
       final reply = await _interviewRepo.askAssistant(query, role: role);
@@ -680,7 +684,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           });
           _isCopilotThinking = false;
         });
-        _bottomSheetSetState?.call(() {});
       }
     } catch (_) {
       if (mounted) {
@@ -692,7 +695,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           });
           _isCopilotThinking = false;
         });
-        _bottomSheetSetState?.call(() {});
       }
     }
   }
@@ -708,7 +710,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     _interviewRepo.sendSignal(
       room: _roomId,
       fromUser: myUserId,
-      toUser: '',
       type: 'ai_mode',
       payload: {
         'active': _isAIModeActive,
@@ -716,74 +717,39 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       },
     );
 
-    if (_isAIModeActive) {
-      _sendMessage(customText: '[AI Interviewer Nora 🎙️]: $_currentAIQuestion');
-      _speakAIQuestion(_currentAIQuestion);
-    } else {
-      _webrtcService.stopSpeaking();
-      setState(() => _isAISpeaking = false);
-    }
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: const Color(0xFFD946EF),
         content: Text(_isAIModeActive
-            ? '🤖 Handed over to AI Nora! Nora is now asking interview questions in voice.'
+            ? '🤖 Handed over to AI Nora! Nora is now asking interview questions.'
             : '👤 Resumed manual recruiter interview control.'),
       ),
     );
   }
 
-  void _nextAIQuestion() async {
+  void _nextAIQuestion() {
     final user = ref.read(authProvider).user;
     final myUserId = (user?.id ?? 999).toString();
 
     setState(() {
-      _currentAIQuestionIdx = _currentAIQuestionIdx + 1;
+      _currentAIQuestionIdx = (_currentAIQuestionIdx + 1) % _aiQuestions.length;
     });
-
-    String nextQ = '';
-    try {
-      final jobTitle = _interviewData?['job_title']?.toString() ?? 'Full-Stack Software Engineer';
-      final dynamicQuestion = await _interviewRepo.getVoiceInterviewQuestion(
-        jobTitle: jobTitle,
-        round: _currentAIQuestionIdx + 1,
-        candidateName: _interviewData?['candidate_name']?.toString(),
-      );
-      if (dynamicQuestion.isNotEmpty) {
-        nextQ = dynamicQuestion;
-      }
-    } catch (_) {}
-
-    if (nextQ.isEmpty) {
-      nextQ = _aiQuestions[_currentAIQuestionIdx % _aiQuestions.length];
-    }
-
-    if (mounted) {
-      setState(() {
-        _currentAIQuestion = nextQ;
-      });
-    }
 
     _interviewRepo.sendSignal(
       room: _roomId,
       fromUser: myUserId,
-      toUser: '',
       type: 'ai_mode',
       payload: {
         'active': true,
-        'question': nextQ,
+        'question': _currentAIQuestion,
       },
     );
 
-    // Announce in chat
-    _sendMessage(customText: '[AI Interviewer Nora 🎙️]: $nextQ');
-
-    // Speak aloud using voice!
-    _speakAIQuestion(nextQ);
+    // Also inject question into in-room chat
+    _sendMessage(customText: '[AI Interviewer Nora]: $_currentAIQuestion');
   }
 
-  String get _currentAIQuestion => _activeQuestionText.isNotEmpty ? _activeQuestionText : _aiQuestions[_currentAIQuestionIdx % _aiQuestions.length];
+  String get _currentAIQuestion => _activeQuestionText.isNotEmpty ? _activeQuestionText : _aiQuestions[_currentAIQuestionIdx];
   set _currentAIQuestion(String val) => _activeQuestionText = val;
 
   void _toggleRecording() {
@@ -1050,16 +1016,13 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) {
-          _bottomSheetSetState = setSheetState;
           return FractionallySizedBox(
             heightFactor: 0.85,
             child: _buildChatAndCopilotPanel(isModal: true, onStateUpdate: () => setSheetState(() {})),
           );
         },
       ),
-    ).whenComplete(() {
-      _bottomSheetSetState = null;
-    });
+    );
   }
 
   @override
@@ -1344,25 +1307,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
                                     ],
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color: _isAISpeaking ? const Color(0xFF10B981).withOpacity(0.2) : Colors.white10,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: _isAISpeaking ? const Color(0xFF10B981) : Colors.white24,
-                                    ),
-                                  ),
-                                  child: IconButton(
-                                    icon: Icon(
-                                      _isAISpeaking ? Icons.volume_up : Icons.volume_up_outlined,
-                                      size: 18,
-                                      color: _isAISpeaking ? const Color(0xFF10B981) : Colors.white,
-                                    ),
-                                    tooltip: _isAISpeaking ? 'Nora Speaking... (tap to replay)' : 'Hear AI Voice Question',
-                                    onPressed: () => _speakAIQuestion(_currentAIQuestion),
-                                  ),
-                                ),
                                 if (isHost) ...[
                                   const SizedBox(width: 8),
                                   ElevatedButton.icon(
@@ -1372,7 +1316,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
-                                    icon: const Icon(Icons.auto_awesome, size: 14),
+                                    icon: const Icon(Icons.skip_next, size: 14),
                                     label: const Text('Next Q', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                   ),
                                 ],
