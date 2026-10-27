@@ -61,28 +61,25 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
       setState(() => _isUploading = true);
 
       final dio = ApiClient().dio;
-      try {
-        final formData = FormData();
-        formData.files.add(MapEntry(
-          'file',
-          MultipartFile.fromBytes(bytes, filename: file.name),
-        ));
-        formData.fields.add(MapEntry('file_name', file.name));
-        formData.fields.add(MapEntry('file_size', size.toString()));
+      final formData = FormData();
+      formData.files.add(MapEntry(
+        'file',
+        MultipartFile.fromBytes(bytes, filename: file.name),
+      ));
+      formData.fields.add(MapEntry('file_name', file.name));
+      formData.fields.add(MapEntry('file_size', size.toString()));
 
-        await dio.post(ApiConfig.resumes, data: formData);
-      } catch (_) {
-        await dio.post(
-          ApiConfig.aiResumeParse,
-          data: {
-            'file_name': file.name,
-            'raw_text': 'Senior Full-Stack & AI Engineer Resume: Flutter, Dart, Python, Django, PostgreSQL, Docker, Microservices.',
-          },
-        );
-      }
+      await dio.post(
+        ApiConfig.resumes,
+        data: formData,
+        options: Options(contentType: 'multipart/form-data'),
+      );
 
       await _fetchResumes();
-      setState(() => _isUploading = false);
+      setState(() {
+        _selectedResumeIndex = 0;
+        _isUploading = false;
+      });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -154,52 +151,99 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Header
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                            // Header: responsive layout
+                            if (isDesktop)
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Resume Manager & ATS Scanner',
+                                          style: AppTypography.displaySmall.copyWith(fontSize: 28),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Upload PDF/DOCX to get instant ATS compatibility scores, keyword match analysis & recruiter insights.',
+                                          style: AppTypography.bodySmall,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Text(
-                                        'Resume Manager & ATS Scanner',
-                                        style: AppTypography.displaySmall.copyWith(fontSize: isDesktop ? 28 : 22),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'Upload PDF/DOCX to get instant ATS compatibility scores, keyword match analysis & recruiter insights.',
-                                        style: AppTypography.bodySmall,
+                                      if (_resumes.isNotEmpty) ...[
+                                        OutlinedButton.icon(
+                                          onPressed: _isUploading ? null : () => _uploadResume(isReupload: true),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: const Color(0xFFD946EF),
+                                            side: const BorderSide(color: Color(0xFFD946EF)),
+                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          icon: const Icon(Icons.sync, size: 16, color: Color(0xFFD946EF)),
+                                          label: const Text('Re-upload Resume', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        ),
+                                        const SizedBox(width: 10),
+                                      ],
+                                      AppButton(
+                                        label: 'Upload Resume',
+                                        icon: const Icon(Icons.upload_file, size: 18, color: Colors.white),
+                                        isLoading: _isUploading,
+                                        onPressed: () => _uploadResume(isReupload: false),
                                       ),
                                     ],
                                   ),
-                                ),
-                                Wrap(
-                                  spacing: 10,
-                                  runSpacing: 10,
-                                  children: [
-                                    if (_resumes.isNotEmpty)
-                                      OutlinedButton.icon(
-                                        onPressed: _isUploading ? null : () => _uploadResume(isReupload: true),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: const Color(0xFFD946EF),
-                                          side: const BorderSide(color: Color(0xFFD946EF)),
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ],
+                              )
+                            else
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Resume Manager & ATS Scanner',
+                                    style: AppTypography.displaySmall.copyWith(fontSize: 22),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Upload PDF/DOCX to get instant ATS compatibility scores, keyword match analysis & recruiter insights.',
+                                    style: AppTypography.bodySmall,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      if (_resumes.isNotEmpty) ...[
+                                        Expanded(
+                                          child: OutlinedButton.icon(
+                                            onPressed: _isUploading ? null : () => _uploadResume(isReupload: true),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: const Color(0xFFD946EF),
+                                              side: const BorderSide(color: Color(0xFFD946EF)),
+                                              padding: const EdgeInsets.symmetric(vertical: 12),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                            ),
+                                            icon: const Icon(Icons.sync, size: 16, color: Color(0xFFD946EF)),
+                                            label: const Text('Re-upload', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                          ),
                                         ),
-                                        icon: const Icon(Icons.sync, size: 16, color: Color(0xFFD946EF)),
-                                        label: const Text('Re-upload Resume', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        const SizedBox(width: 10),
+                                      ],
+                                      Expanded(
+                                        child: AppButton(
+                                          label: 'Upload Resume',
+                                          icon: const Icon(Icons.upload_file, size: 16, color: Colors.white),
+                                          isLoading: _isUploading,
+                                          onPressed: () => _uploadResume(isReupload: false),
+                                        ),
                                       ),
-                                    AppButton(
-                                      label: 'Upload Resume',
-                                      icon: const Icon(Icons.upload_file, size: 18, color: Colors.white),
-                                      isLoading: _isUploading,
-                                      onPressed: () => _uploadResume(isReupload: false),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             const SizedBox(height: 24),
 
                             if (_isLoading)
@@ -281,62 +325,24 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
                                     const SizedBox(height: 18),
 
                                     // Strengths & Recommendations
-                                    Row(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  const Icon(Icons.check_circle, color: AppColors.success, size: 18),
-                                                  const SizedBox(width: 8),
-                                                  Text('ATS Strengths Identified', style: AppTypography.titleSmall.copyWith(color: AppColors.success)),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 10),
-                                              ...strengths.map((s) => Padding(
-                                                padding: const EdgeInsets.only(bottom: 6),
-                                                child: Row(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    const Text('• ', style: TextStyle(color: AppColors.success, fontWeight: FontWeight.bold)),
-                                                    Expanded(child: Text(s, style: AppTypography.bodySmall)),
-                                                  ],
-                                                ),
-                                              )),
-                                            ],
-                                          ),
-                                        ),
-                                        if (isDesktop) const SizedBox(width: 24),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  const Icon(Icons.lightbulb_outline, color: AppColors.warning, size: 18),
-                                                  const SizedBox(width: 8),
-                                                  Text('Recommendations to Boost Score', style: AppTypography.titleSmall.copyWith(color: AppColors.warning)),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 10),
-                                              ...recommendations.map((r) => Padding(
-                                                padding: const EdgeInsets.only(bottom: 6),
-                                                child: Row(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    const Text('• ', style: TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold)),
-                                                    Expanded(child: Text(r, style: AppTypography.bodySmall)),
-                                                  ],
-                                                ),
-                                              )),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                    if (isDesktop)
+                                      Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: _buildStrengthsColumn(strengths)),
+                                          const SizedBox(width: 24),
+                                          Expanded(child: _buildRecommendationsColumn(recommendations)),
+                                        ],
+                                      )
+                                    else
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          _buildStrengthsColumn(strengths),
+                                          const SizedBox(height: 20),
+                                          _buildRecommendationsColumn(recommendations),
+                                        ],
+                                      ),
                                   ],
                                 ),
                               ),
@@ -539,6 +545,58 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
             ),
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildStrengthsColumn(List<String> strengths) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.check_circle, color: AppColors.success, size: 18),
+            const SizedBox(width: 8),
+            Text('ATS Strengths Identified', style: AppTypography.titleSmall.copyWith(color: AppColors.success)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ...strengths.map((s) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('• ', style: TextStyle(color: AppColors.success, fontWeight: FontWeight.bold)),
+              Expanded(child: Text(s, style: AppTypography.bodySmall)),
+            ],
+          ),
+        )),
+      ],
+    );
+  }
+
+  Widget _buildRecommendationsColumn(List<String> recommendations) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.lightbulb_outline, color: AppColors.warning, size: 18),
+            const SizedBox(width: 8),
+            Text('Recommendations to Boost Score', style: AppTypography.titleSmall.copyWith(color: AppColors.warning)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ...recommendations.map((r) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('• ', style: TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold)),
+              Expanded(child: Text(r, style: AppTypography.bodySmall)),
+            ],
+          ),
+        )),
       ],
     );
   }
