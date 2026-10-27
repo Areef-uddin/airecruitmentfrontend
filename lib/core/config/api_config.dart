@@ -57,7 +57,6 @@ class ApiConfig {
   static const String interviewRoomHeartbeat = '/interviews/room-heartbeat/';
   static const String interviewRoomLeave = '/interviews/room-leave/';
   static const String interviewSignal = '/interviews/signal/';
-  static const String interviewRoomChat = '/interviews/room-chat/';
 
   // Notifications
   static const String notifications = '/notifications/';
@@ -65,6 +64,9 @@ class ApiConfig {
 
   // Messaging
   static const String conversations = '/messaging/conversations/';
+  static String conversationMessages(int id) => '/messaging/conversations/$id/messages/';
+  static const String chatContacts = '/messaging/contacts/';
+  static const String chatAiSuggestions = '/messaging/ai-suggestions/';
 
   // AI Services
   static const String aiResumeParse = '/ai/resume-parse/';

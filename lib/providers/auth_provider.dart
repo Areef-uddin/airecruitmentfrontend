@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_model.dart';
 import '../repositories/auth_repository.dart';
+import '../core/storage/token_storage.dart';
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) => AuthRepository());
 
@@ -33,10 +34,15 @@ class AuthNotifier extends Notifier<AuthState> {
   Future<void> checkCurrentUser() async {
     final repo = ref.read(authRepositoryProvider);
     try {
+      final cached = await TokenStorage.getUser();
+      if (cached != null) {
+        state = AuthState(user: UserModel.fromJson(cached), isLoading: false);
+      }
       final user = await repo.getCurrentUser();
       state = AuthState(user: user, isLoading: false);
     } catch (_) {
-      state = AuthState(user: null, isLoading: false);
+      final cached = await TokenStorage.getUser();
+      state = AuthState(user: cached != null ? UserModel.fromJson(cached) : null, isLoading: false);
     }
   }
 

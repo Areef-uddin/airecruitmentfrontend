@@ -16,7 +16,7 @@ List<SidebarItem> getSidebarItems(UserModel? user) {
   if (user?.isCandidate ?? false) {
     return const [
       SidebarItem(title: 'Overview', icon: Icons.dashboard_outlined, route: '/candidate/dashboard'),
-      SidebarItem(title: 'AI Career Insights', icon: Icons.auto_awesome_outlined, route: '/candidate/dashboard'),
+      SidebarItem(title: 'Direct Chat & Messages', icon: Icons.chat_bubble_outline, route: '/messages'),
       SidebarItem(title: 'Live AI Interview', icon: Icons.videocam_outlined, route: '/live-interview'),
       SidebarItem(title: 'My Applications', icon: Icons.assignment_outlined, route: '/candidate/applications'),
       SidebarItem(title: 'My Resumes', icon: Icons.description_outlined, route: '/candidate/resumes'),
@@ -26,18 +26,28 @@ List<SidebarItem> getSidebarItems(UserModel? user) {
   } else if (user?.isRecruiter ?? false) {
     return const [
       SidebarItem(title: 'Overview', icon: Icons.analytics_outlined, route: '/recruiter/dashboard'),
+      SidebarItem(title: 'Candidate Messages', icon: Icons.chat_bubble_outline, route: '/messages'),
       SidebarItem(title: 'Applicant Pipeline', icon: Icons.view_kanban_outlined, route: '/recruiter/pipeline'),
-      SidebarItem(title: 'Post New Job (AI)', icon: Icons.add_circle_outline, route: '/recruiter/create-job'),
       SidebarItem(title: 'Candidate Search', icon: Icons.people_outline, route: '/recruiter/candidates'),
+      SidebarItem(title: 'Post New Job (AI)', icon: Icons.add_circle_outline, route: '/recruiter/create-job'),
       SidebarItem(title: 'Live AI Screening', icon: Icons.smart_toy_outlined, route: '/live-interview'),
       SidebarItem(title: 'Job Postings', icon: Icons.work_outline, route: '/recruiter/jobs'),
     ];
-  } else {
+  } else if (user?.isSuperAdmin ?? false) {
     return const [
       SidebarItem(title: 'Platform Overview', icon: Icons.admin_panel_settings_outlined, route: '/admin/dashboard'),
+      SidebarItem(title: 'Direct Chat & Messages', icon: Icons.chat_bubble_outline, route: '/messages'),
       SidebarItem(title: 'User Management', icon: Icons.manage_accounts_outlined, route: '/admin/dashboard'),
       SidebarItem(title: 'Live AI Screening', icon: Icons.videocam_outlined, route: '/live-interview'),
       SidebarItem(title: 'Browse Public Jobs', icon: Icons.explore_outlined, route: '/jobs'),
+    ];
+  } else {
+    // Guest items for mobile drawer
+    return const [
+      SidebarItem(title: 'Browse Jobs', icon: Icons.work_outline, route: '/jobs'),
+      SidebarItem(title: 'Live AI Interview Demo', icon: Icons.videocam_outlined, route: '/live-interview'),
+      SidebarItem(title: 'Sign In', icon: Icons.login, route: '/login'),
+      SidebarItem(title: 'Create Account', icon: Icons.person_add_outlined, route: '/register'),
     ];
   }
 }
@@ -149,15 +159,6 @@ class AppMobileDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = getSidebarItems(user);
 
-    final isGuest = user == null;
-    final guestItems = const [
-      SidebarItem(title: 'Live AI Demo', icon: Icons.videocam_outlined, route: '/live-interview'),
-      SidebarItem(title: 'Browse Jobs', icon: Icons.work_outline, route: '/jobs'),
-      SidebarItem(title: 'Sign In', icon: Icons.login, route: '/login'),
-      SidebarItem(title: 'Create Account', icon: Icons.person_add_outlined, route: '/register'),
-    ];
-    final displayItems = isGuest ? guestItems : items;
-
     return Container(
       width: double.infinity,
       constraints: BoxConstraints(
@@ -167,36 +168,37 @@ class AppMobileDrawer extends StatelessWidget {
         color: Color(0xFF0F1019),
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         border: Border(
-          top: BorderSide(color: Color(0xFF222538), width: 1.5),
+          top: BorderSide(color: Color(0xFF2E324D), width: 1),
         ),
       ),
       child: SafeArea(
-        top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top drag handle
+            // Drag Handle Indicator
             Center(
               child: Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                margin: const EdgeInsets.only(top: 10, bottom: 4),
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.white24,
+                  color: const Color(0xFF334155),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
+
+            // User Info or Guest Welcome
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               child: Row(
                 children: [
                   CircleAvatar(
                     radius: 20,
                     backgroundColor: AppColors.primary,
                     child: Text(
-                      user?.fullName.isNotEmpty ?? false ? user!.fullName[0].toUpperCase() : (isGuest ? 'G' : 'U'),
+                      user?.fullName.isNotEmpty ?? false ? user!.fullName[0].toUpperCase() : (user != null ? 'U' : 'T'),
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -206,15 +208,17 @@ class AppMobileDrawer extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          user?.fullName ?? (isGuest ? 'Guest Visitor' : 'TalentAI Member'),
+                          user?.fullName ?? 'TalentAI Platform',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                         ),
                         Text(
-                          isGuest
-                              ? 'Explore TalentAI'
-                              : (user?.role == 'RECRUITER' ? 'Recruiter' : user?.role == 'SUPER_ADMIN' ? 'Admin' : 'Candidate'),
+                          user?.role == 'RECRUITER'
+                              ? 'Recruiter Portal'
+                              : user?.role == 'SUPER_ADMIN'
+                                  ? 'Platform Admin'
+                                  : (user != null ? 'Candidate Portal' : 'Welcome to TalentAI'),
                           style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                         ),
                       ],
@@ -229,14 +233,16 @@ class AppMobileDrawer extends StatelessWidget {
             ),
             const Divider(color: Color(0xFF222538), height: 1),
             const SizedBox(height: 8),
+
+            // Navigation Links
             Flexible(
               child: ListView.separated(
                 shrinkWrap: true,
                 padding: const EdgeInsets.symmetric(horizontal: 14),
-                itemCount: displayItems.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 4),
                 itemBuilder: (context, index) {
-                  final item = displayItems[index];
+                  final item = items[index];
                   final isSelected = currentRoute.startsWith(item.route) && item.route != '/';
 
                   return InkWell(
@@ -246,7 +252,7 @@ class AppMobileDrawer extends StatelessWidget {
                     },
                     borderRadius: BorderRadius.circular(10),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                       decoration: BoxDecoration(
                         color: isSelected ? AppColors.primary.withOpacity(0.15) : Colors.transparent,
                         borderRadius: BorderRadius.circular(10),
@@ -271,7 +277,8 @@ class AppMobileDrawer extends StatelessWidget {
                 },
               ),
             ),
-            if (!isGuest) ...[
+
+            if (user != null) ...[
               const Divider(color: Color(0xFF222538), height: 1),
               ListTile(
                 leading: const Icon(Icons.logout, color: AppColors.accentRose),

@@ -253,9 +253,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _callSeconds++);
     });
-
-    // 7. Load room meeting chat history
-    _loadRoomChatHistory();
   }
 
   void _startCaptions() {
@@ -289,6 +286,18 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           _participants = status.participants;
           if (status.interview != null) {
             _interviewData = status.interview;
+            final history = status.interview!['chat_history'] as List? ?? [];
+            if (_chatMessages.isEmpty && history.isNotEmpty) {
+              for (final item in history) {
+                if (item is Map) {
+                  _chatMessages.add({
+                    'sender': item['sender']?.toString() ?? 'Participant',
+                    'text': item['text']?.toString() ?? '',
+                    'time': item['time']?.toString() ?? '',
+                  });
+                }
+              }
+            }
           }
         });
 
@@ -387,22 +396,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     }
   }
 
-  void _loadRoomChatHistory() async {
-    try {
-      final history = await _interviewRepo.getRoomChat(_roomId);
-      if (mounted && history.isNotEmpty) {
-        setState(() {
-          for (final h in history) {
-            final exists = _chatMessages.any((m) => m['text'] == h['text'] && m['time'] == h['time']);
-            if (!exists) {
-              _chatMessages.add(h);
-            }
-          }
-        });
-      }
-    } catch (_) {}
-  }
-
   void _handleIncomingChatMessage(dynamic payload) {
     Map<String, String> msg = {};
     if (payload is Map) {
@@ -425,11 +418,15 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     }
 
     if (msg['text']?.isNotEmpty ?? false) {
-      final exists = _chatMessages.any((m) => m['text'] == msg['text'] && m['time'] == msg['time']);
-      if (!exists && mounted) {
-        setState(() {
-          _chatMessages.add(msg);
-        });
+      final user = ref.read(authProvider).user;
+      final myName = user?.fullName ?? user?.email ?? 'Me';
+      final isMyEcho = msg['sender'] == myName && _chatMessages.isNotEmpty && _chatMessages.last['text'] == msg['text'];
+      if (!isMyEcho) {
+        if (mounted) {
+          setState(() {
+            _chatMessages.add(msg);
+          });
+        }
       }
     }
   }
@@ -642,17 +639,8 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     _interviewRepo.sendSignal(
       room: _roomId,
       fromUser: _myParticipantId,
-      toUser: 'all',
       type: 'chat',
       payload: msg,
-    );
-
-    _interviewRepo.sendRoomChatMessage(
-      room: _roomId,
-      sender: senderName,
-      text: text,
-      fromUser: _myParticipantId,
-      time: timeStr,
     );
   }
 

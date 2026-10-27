@@ -315,6 +315,23 @@ class _RecruiterPipelineScreenState extends ConsumerState<RecruiterPipelineScree
                                           ),
                                           child: const Text('Reject', style: TextStyle(fontSize: 11)),
                                         ),
+                                        OutlinedButton.icon(
+                                          onPressed: () {
+                                            final candId = app.candidate?.id;
+                                            if (candId != null) {
+                                              context.go('/messages?user_id=$candId');
+                                            } else {
+                                              context.go('/messages');
+                                            }
+                                          },
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.white,
+                                            side: const BorderSide(color: Color(0xFF38BDF8)),
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          ),
+                                          icon: const Icon(Icons.chat_bubble_outline, size: 14, color: Color(0xFF38BDF8)),
+                                          label: const Text('Chat', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                        ),
                                         OutlinedButton(
                                           onPressed: () => _updateStatus(app.id, 'SHORTLISTED'),
                                           style: OutlinedButton.styleFrom(

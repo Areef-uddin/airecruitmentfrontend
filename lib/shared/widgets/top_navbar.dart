@@ -201,33 +201,19 @@ class TopNavbar extends ConsumerWidget {
       ),
       child: Row(
         children: [
-          // Mobile Hamburger Menu
+          // Mobile Hamburger Menu (Available on all mobile screens)
           if (!isDesktop) ...[
             IconButton(
               icon: const Icon(Icons.menu, color: Colors.white, size: 24),
               tooltip: 'Navigation Menu',
-              padding: const EdgeInsets.all(6),
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               onPressed: () => _openMobileMenu(context, user),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
           ],
 
           // Brand Logo: "nxus"
           InkWell(
-            onTap: () {
-              if (user != null) {
-                if (user.isCandidate) {
-                  context.go('/candidate/dashboard');
-                } else if (user.isRecruiter) {
-                  context.go('/recruiter/dashboard');
-                } else {
-                  context.go('/admin/dashboard');
-                }
-              } else {
-                context.go('/');
-              }
-            },
+            onTap: () => context.go('/'),
             borderRadius: BorderRadius.circular(8),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -266,6 +252,17 @@ class TopNavbar extends ConsumerWidget {
               ],
             ),
           ),
+
+          if (isDesktop) ...[
+            const SizedBox(width: 32),
+            _NavLink(title: 'Browse Jobs', onTap: () => context.go('/jobs')),
+            const SizedBox(width: 20),
+            _NavLink(title: 'Live AI Demo', onTap: () => context.go('/live-interview')),
+            if (user != null) ...[
+              const SizedBox(width: 20),
+              _NavLink(title: 'Messages', onTap: () => context.go('/messages')),
+            ],
+          ],
 
           const Spacer(),
 
@@ -439,6 +436,32 @@ class TopNavbar extends ConsumerWidget {
               ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _NavLink extends StatelessWidget {
+  final String title;
+  final VoidCallback onTap;
+
+  const _NavLink({required this.title, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Text(
+          title,
+          style: AppTypography.bodyMedium.copyWith(
+            color: AppColors.textSecondary,
+            fontWeight: FontWeight.w500,
+            fontSize: 13,
+          ),
+        ),
       ),
     );
   }

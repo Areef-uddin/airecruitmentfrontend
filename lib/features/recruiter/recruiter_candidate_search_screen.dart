@@ -392,16 +392,36 @@ class _RecruiterCandidateSearchScreenState extends ConsumerState<RecruiterCandid
                                                           );
                                                         }
 
-                                                        return ElevatedButton.icon(
-                                                          onPressed: () => _openInviteDialog(c),
-                                                          style: ElevatedButton.styleFrom(
-                                                            backgroundColor: const Color(0xFFD946EF),
-                                                            foregroundColor: Colors.white,
-                                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                                          ),
-                                                          icon: const Icon(Icons.video_call, size: 16),
-                                                          label: const Text('Invite to Interview', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                                        return Row(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            OutlinedButton.icon(
+                                                              onPressed: () {
+                                                                final candUserId = c['user_id'] ?? c['id'];
+                                                                context.go('/messages?user_id=$candUserId');
+                                                              },
+                                                              style: OutlinedButton.styleFrom(
+                                                                foregroundColor: Colors.white,
+                                                                side: const BorderSide(color: Color(0xFF38BDF8)),
+                                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                              ),
+                                                              icon: const Icon(Icons.chat_bubble_outline, size: 15, color: Color(0xFF38BDF8)),
+                                                              label: const Text('Chat', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                                            ),
+                                                            const SizedBox(width: 8),
+                                                            ElevatedButton.icon(
+                                                              onPressed: () => _openInviteDialog(c),
+                                                              style: ElevatedButton.styleFrom(
+                                                                backgroundColor: const Color(0xFFD946EF),
+                                                                foregroundColor: Colors.white,
+                                                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                              ),
+                                                              icon: const Icon(Icons.video_call, size: 16),
+                                                              label: const Text('Invite to Interview', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                                            ),
+                                                          ],
                                                         );
                                                       },
                                                     ),
@@ -504,19 +524,39 @@ class _RecruiterCandidateSearchScreenState extends ConsumerState<RecruiterCandid
                                           return Column(
                                             children: [
                                               const SizedBox(height: 12),
-                                              SizedBox(
-                                                width: double.infinity,
-                                                child: ElevatedButton.icon(
-                                                  onPressed: () => _openInviteDialog(c),
-                                                  style: ElevatedButton.styleFrom(
-                                                    backgroundColor: const Color(0xFFD946EF),
-                                                    foregroundColor: Colors.white,
-                                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                              Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: OutlinedButton.icon(
+                                                      onPressed: () {
+                                                        final candUserId = c['user_id'] ?? c['id'];
+                                                        context.go('/messages?user_id=$candUserId');
+                                                      },
+                                                      style: OutlinedButton.styleFrom(
+                                                        foregroundColor: Colors.white,
+                                                        side: const BorderSide(color: Color(0xFF38BDF8)),
+                                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                      ),
+                                                      icon: const Icon(Icons.chat_bubble_outline, size: 15, color: Color(0xFF38BDF8)),
+                                                      label: const Text('Chat', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                                    ),
                                                   ),
-                                                  icon: const Icon(Icons.video_call, size: 16),
-                                                  label: const Text('Invite to Interview ↗', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                                ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: ElevatedButton.icon(
+                                                      onPressed: () => _openInviteDialog(c),
+                                                      style: ElevatedButton.styleFrom(
+                                                        backgroundColor: const Color(0xFFD946EF),
+                                                        foregroundColor: Colors.white,
+                                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                      ),
+                                                      icon: const Icon(Icons.video_call, size: 16),
+                                                      label: const Text('Invite', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ],
                                           );

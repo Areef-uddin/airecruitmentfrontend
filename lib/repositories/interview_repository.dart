@@ -118,46 +118,6 @@ class InterviewRepository {
     }
   }
 
-  Future<List<Map<String, String>>> getRoomChat(String room) async {
-    try {
-      final response = await _dio.get(
-        ApiConfig.interviewRoomChat,
-        queryParameters: {'room': room},
-      );
-      final List list = response.data['messages'] ?? [];
-      return list.map((e) => {
-        'id': e['id']?.toString() ?? '',
-        'sender': e['sender']?.toString() ?? 'Participant',
-        'text': e['text']?.toString() ?? '',
-        'time': e['time']?.toString() ?? '',
-        'from_user': e['from_user']?.toString() ?? '',
-      }).toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Future<void> sendRoomChatMessage({
-    required String room,
-    required String sender,
-    required String text,
-    required String fromUser,
-    String? time,
-  }) async {
-    try {
-      await _dio.post(
-        ApiConfig.interviewRoomChat,
-        data: {
-          'room': room,
-          'sender': sender,
-          'text': text,
-          'from_user': fromUser,
-          if (time != null && time.isNotEmpty) 'time': time,
-        },
-      );
-    } catch (_) {}
-  }
-
   Future<void> joinRoom(String room, {String? userId, String? role, String? name, bool? videoOn, bool? micOn}) async {
     try {
       await _dio.post(

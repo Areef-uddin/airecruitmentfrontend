@@ -21,6 +21,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final user = ref.read(authProvider).user;
+      if (user != null && mounted) {
+        if (user.isCandidate) {
+          context.go('/candidate/dashboard');
+        } else if (user.isRecruiter) {
+          context.go('/recruiter/dashboard');
+        } else {
+          context.go('/admin/dashboard');
+        }
+      }
+    });
+  }
+
   void _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
