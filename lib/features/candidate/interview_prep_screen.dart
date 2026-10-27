@@ -73,170 +73,6 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
     'Lead / Architect',
   ];
 
-  // Role-based Quizzes Bank
-  final Map<String, List<Map<String, dynamic>>> _quizzesByTrack = {
-    'Flutter & Dart': [
-      {
-        'question': 'How does Flutter achieve 60/120 FPS performance compared to traditional hybrid frameworks?',
-        'options': [
-          'By compiling to native machine code using Skia/Impeller and avoiding a JavaScript bridge',
-          'By wrapping Android and iOS webviews inside a high-speed Chromium container',
-          'By executing Dart in an interpreted VM that renders native UIKit and Android View widgets',
-          'By pre-rendering all UI states on the backend cloud server',
-        ],
-        'correct': 0,
-        'explanation': 'Flutter uses an ahead-of-time (AOT) compiled C/C++ engine (Impeller/Skia) rendering directly to the canvas without any JavaScript bridge serialization.',
-      },
-      {
-        'question': 'Which widget boundary should you wrap an expensive animated widget with to isolate repaints?',
-        'options': [
-          'ClipRect',
-          'RepaintBoundary',
-          'SizedBox.shrink',
-          'Transform.identity',
-        ],
-        'correct': 1,
-        'explanation': 'RepaintBoundary creates a separate render layer (Layer), ensuring that when the subtree rebuilds, only that isolated layer is rasterized.',
-      },
-      {
-        'question': 'In Dart concurrency, what is the key difference between an Event Loop task and a Microtask?',
-        'options': [
-          'Microtasks run on a separate CPU core, whereas event loops run on the main thread',
-          'Microtasks take higher priority and execute immediately before the next event from the event queue',
-          'Event loops handle only timer events, microtasks handle HTTP network calls',
-          'Microtasks are deprecated in Dart 3 and replaced by Isolates',
-        ],
-        'correct': 1,
-        'explanation': 'Dart’s event loop processes the entire microtask queue before fetching the next item from the main event queue.',
-      },
-      {
-        'question': 'When passing data to a background worker isolate in Dart, what is the best practice for zero-copy memory transfer?',
-        'options': [
-          'Json encoding the entire payload as a string',
-          'Using TransferableTypedData with SendPort.send()',
-          'Writing to SQLite and reading in the isolate',
-          'Using shared memory global static variables',
-        ],
-        'correct': 1,
-        'explanation': 'TransferableTypedData allows zero-copy byte buffers to be moved directly across isolate boundaries without deep memory copying.',
-      },
-    ],
-    'Python & Backend': [
-      {
-        'question': 'In Django ORM, what is the key difference between select_related and prefetch_related?',
-        'options': [
-          'select_related performs a SQL JOIN (for single-valued relations), while prefetch_related executes a separate query with IN clause (for many-to-many/reverse relations)',
-          'prefetch_related creates a database trigger while select_related uses redis cache',
-          'select_related is only for SQLite, prefetch_related is for PostgreSQL',
-          'They are identical aliases in Django 4+',
-        ],
-        'correct': 0,
-        'explanation': 'select_related does a single SQL JOIN on ForeignKey/OneToOne, whereas prefetch_related executes two queries and joins in Python memory for ManyToMany.',
-      },
-      {
-        'question': 'How does the Python Global Interpreter Lock (GIL) impact multi-threaded CPU-bound execution?',
-        'options': [
-          'It allows threads to run in parallel on all CPU cores without locks',
-          'It restricts Python bytecode execution to one native thread at a time per process',
-          'It only locks file I/O operations and database connections',
-          'It boosts multi-core performance by 200%',
-        ],
-        'correct': 1,
-        'explanation': 'The GIL ensures memory safety in CPython by permitting only one thread to execute Python bytecode at any moment, making multiprocessing or native C extensions necessary for CPU-bound parallelism.',
-      },
-      {
-        'question': 'Which database index type is most efficient for full-text search and array containment queries in PostgreSQL?',
-        'options': [
-          'B-Tree',
-          'GIN (Generalized Inverted Index)',
-          'BRIN (Block Range Index)',
-          'Hash Index',
-        ],
-        'correct': 1,
-        'explanation': 'GIN indexes are designed for composite values such as arrays, full-text vectors, and JSONB queries with containment operations.',
-      },
-    ],
-    'AI & LLM Systems': [
-      {
-        'question': 'What is the primary role of a cross-encoder Reranker in a modern RAG (Retrieval-Augmented Generation) pipeline?',
-        'options': [
-          'To generate image embeddings for OCR documents',
-          'To rescore top-K retrieved vector chunks jointly with the user query for precise relevance',
-          'To compress the model weights into 4-bit quantization',
-          'To generate synthetic test questions',
-        ],
-        'correct': 1,
-        'explanation': 'Bi-encoders retrieve broad candidate chunks fast, but cross-encoders jointly score (query, document) pairs to achieve high precision before feeding context to the LLM.',
-      },
-      {
-        'question': 'Which quantization technique allows loading 16-bit LLM weights into 4-bit precision with minimal perplexity degradation?',
-        'options': [
-          'QLoRA (Quantized Low-Rank Adaptation with NF4 and double quantization)',
-          'Simple integer truncation',
-          'One-hot encoding',
-          'Float64 expansion',
-        ],
-        'correct': 0,
-        'explanation': 'QLoRA uses NormalFloat4 (NF4) data type and double quantization with page optimizers to fine-tune 70B+ models on consumer GPUs.',
-      },
-    ],
-    'System Design': [
-      {
-        'question': 'In a distributed systems architecture, what does the CAP theorem state?',
-        'options': [
-          'A distributed data store can simultaneously provide at most two out of Consistency, Availability, and Partition Tolerance',
-          'All microservices must share a single database to guarantee transactions',
-          'Cache memory must exceed disk storage capacity by 2x',
-          'Latency is inversely proportional to bandwidth',
-        ],
-        'correct': 0,
-        'explanation': 'Under network partition (P), a distributed system must choose between guaranteeing all nodes see the same data (C) or responding to all requests (A).',
-      },
-    ],
-    'DevOps & Cloud': [
-      {
-        'question': 'What is the core principle of GitOps deployment workflows using tools like ArgoCD?',
-        'options': [
-          'Directly running kubectl apply from developers local terminal',
-          'Git repository serves as the single source of truth for desired infrastructure and declarative cluster state',
-          'Storing production secrets in plain public GitHub commits',
-          'Disabling all container health checks in staging',
-        ],
-        'correct': 1,
-        'explanation': 'GitOps uses Git as the declarative single source of truth, with continuous reconciliation controllers reconciling actual cluster state with Git.',
-      },
-    ],
-  };
-
-  // Mock Voice Interview Role-Specific Questions
-  final Map<String, List<String>> _mockQuestionsByTrack = {
-    'Flutter & Dart': [
-      'Can you describe your experience designing scalable Flutter architecture and how you structure clean domain/presentation layers?',
-      'How do you manage complex reactive states across multiple modules, and how do you prevent unnecessary widget rebuilds?',
-      'Walk me through how you implement secure offline synchronization, local database caching, and network retry policies.',
-      'Describe a difficult memory leak or rendering stutter issue you profiled using Flutter DevTools and resolved.',
-    ],
-    'Python & Backend': [
-      'Walk us through how you design high-throughput REST and GraphQL APIs using Django and FastAPI under heavy concurrent traffic.',
-      'How do you handle database connection pooling, slow query diagnostics, and distributed locking with Redis in production?',
-      'Describe your approach to designing resilient background worker queues using Celery or RabbitMQ.',
-      'Explain a major production incident you diagnosed involving race conditions or database deadlocks.',
-    ],
-    'AI & LLM Systems': [
-      'How do you design a scalable production RAG architecture that prevents hallucination and handles streaming responses with sub-second latency?',
-      'Explain how you fine-tune open source models with LoRA/QLoRA and how you benchmark their domain performance.',
-      'What strategies do you use for agentic orchestration, tool invocation, and token budget management?',
-    ],
-    'System Design': [
-      'How would you design a distributed real-time messaging platform like WhatsApp or Slack handling 50M concurrent connections?',
-      'Explain how you would architect a globally distributed rate limiter with low latency and eventual consistency.',
-    ],
-    'DevOps & Cloud': [
-      'Walk us through your strategy for zero-downtime Kubernetes deployments, automated canary rollouts, and multi-region failovers.',
-      'How do you enforce automated cloud security, IAM least-privilege, and secrets rotation across CI/CD pipelines?',
-    ],
-  };
-
   String _candidateResumeSummary = '';
   List<String> _dynamicMockQuestions = [];
   bool _isLoadingQuestions = false;
@@ -282,8 +118,7 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
   }
 
   List<Map<String, dynamic>> _getActiveQuizList() {
-    if (_dynamicQuizzes.isNotEmpty) return _dynamicQuizzes;
-    return _quizzesByTrack[_selectedTrack] ?? _quizzesByTrack['Flutter & Dart']!;
+    return _dynamicQuizzes;
   }
 
   Future<void> _generateGeminiQuizzes({bool append = false}) async {
@@ -467,7 +302,12 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
     } catch (_) {}
 
     if (_dynamicMockQuestions.isEmpty) {
-      _dynamicMockQuestions = _mockQuestionsByTrack[_selectedTrack] ?? _mockQuestionsByTrack['Flutter & Dart']!;
+      _dynamicMockQuestions = [
+        'Can you walk us through a recent production system you architected for  (), and the key engineering tradeoffs you made?',
+        'How do you handle scalability, high concurrency, and performance bottlenecks in your daily work as a ',
+        'Describe a critical production bug or outage you diagnosed in  and the steps you took to remediate and prevent it.',
+        'How do you ensure test coverage, CI/CD pipeline reliability, and code quality across your engineering team?',
+      ];
     }
 
     setState(() {
@@ -567,9 +407,8 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
       _mockFeedback = 'AI Nora is evaluating your response with Gemini...';
     });
 
-    final questions = _dynamicMockQuestions.isNotEmpty
-        ? _dynamicMockQuestions
-        : (_mockQuestionsByTrack[_selectedTrack] ?? _mockQuestionsByTrack['Flutter & Dart']!);
+    final questions = _dynamicMockQuestions;
+    if (questions.isEmpty) return;
     final q = questions[_mockQuestionIndex];
 
     double answerScore = 88.0;
@@ -1491,9 +1330,15 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
       );
     }
 
-    final questions = _dynamicMockQuestions.isNotEmpty
-        ? _dynamicMockQuestions
-        : (_mockQuestionsByTrack[_selectedTrack] ?? _mockQuestionsByTrack['Flutter & Dart']!);
+    final questions = _dynamicMockQuestions;
+    if (questions.isEmpty) {
+      return const AppCard(
+        padding: EdgeInsets.all(32),
+        child: Center(
+          child: Text('AI Nora is preparing dynamic questions with Gemini...', style: TextStyle(color: Colors.white)),
+        ),
+      );
+    }
     final currentQ = questions[_mockQuestionIndex];
 
     return Column(
