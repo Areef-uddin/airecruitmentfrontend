@@ -18,6 +18,6 @@ echo "=== Getting Packages ==="
 flutter pub get
 
 echo "=== Building Flutter Web for Release ==="
-flutter build web --release
+flutter build web --release --no-wasm-dry-run --no-tree-shake-icons
 
 echo "=== Flutter Web Build Complete in build/web ==="
