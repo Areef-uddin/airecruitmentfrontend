@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 class ApiConfig {
   // Production Live Render Backend URL
   static const String liveProductionUrl = 'https://airecruitmentbackend.onrender.com/api';
-  static const String liveFrontendUrl = 'https://airecruitmentfrontend.vercel.app';
+  static const String liveFrontendUrl = 'https://airecruitmentfrontend-ahsx.vercel.app';
 
   // Dynamic web origin: uses hosted Vercel frontend URL, never localhost
   static String get webOrigin {
