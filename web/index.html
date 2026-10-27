@@ -148,10 +148,12 @@
         const audioStream = new MediaStream(audioTracks);
 
         audioTracks.forEach(t => {
+          t.enabled = true;
           t.onunmute = () => {
             console.log('WebRTC: Remote audio track unmuted for', uid);
             if (peer.audioElem) {
               peer.audioElem.muted = false;
+              peer.audioElem.volume = 1.0;
               peer.audioElem.play().catch(() => {});
             }
           };
@@ -166,7 +168,7 @@
             const playPromise = peer.audioElem.play();
             if (playPromise !== undefined) {
               playPromise.catch(e => {
-                console.log('Audio autoplay retry queued for user gesture:', e);
+                console.log('Audio autoplay queued until user gesture:', e);
               });
             }
           } catch (err) {
@@ -177,7 +179,7 @@
         // 2. Route directly to WebAudio Context destination (unmuted, bypasses element autoplay flags)
         try {
           ensureAudioContext();
-          if (audioCtx && audioCtx.state === 'running') {
+          if (audioCtx) {
             if (peer.audioSourceNode) {
               try { peer.audioSourceNode.disconnect(); } catch (_) {}
             }
@@ -193,21 +195,24 @@
       const resumeAllWebRTCAudio = () => {
         ensureAudioContext();
         Object.values(peers).forEach(p => {
-          if (p.audioElem && p.audioElem.srcObject) {
+          if (p.audioElem) {
+            if (p.remoteStream && p.remoteStream.getAudioTracks().length > 0) {
+              p.audioElem.srcObject = new MediaStream(p.remoteStream.getAudioTracks());
+            }
             p.audioElem.muted = false;
             p.audioElem.volume = 1.0;
             p.audioElem.play().catch(() => {});
           }
           if (p.videoElem && p.videoElem.srcObject) {
-            p.videoElem.muted = false;
-            p.videoElem.volume = 1.0;
+            p.videoElem.muted = true;
+            p.videoElem.volume = 0.0;
             p.videoElem.play().catch(() => {});
           }
         });
       };
-      window.addEventListener('click', resumeAllWebRTCAudio);
-      window.addEventListener('touchstart', resumeAllWebRTCAudio);
-      window.addEventListener('keydown', resumeAllWebRTCAudio);
+      ['click', 'pointerdown', 'touchstart', 'keydown'].forEach(evt => {
+        window.addEventListener(evt, resumeAllWebRTCAudio, { passive: true });
+      });
 
       async function getMediaStream() {
         if (localStream) return localStream;
@@ -373,6 +378,7 @@
             videoElem.setAttribute('playsinline', 'true');
             videoElem.setAttribute('webkit-playsinline', 'true');
             videoElem.muted = true;
+            videoElem.volume = 0.0;
             videoElem.autoplay = true;
 
             // Match exact uid, or if only 1 remote peer exists, match that peer
@@ -391,8 +397,8 @@
               peer.videoElem = videoElem;
               if (peer.remoteStream) {
                 videoElem.srcObject = peer.remoteStream;
-                videoElem.muted = false;
-                videoElem.volume = 1.0;
+                videoElem.muted = true;
+                videoElem.volume = 0.0;
                 videoElem.play().catch(() => {});
               }
             }
@@ -405,16 +411,17 @@
         },
 
         createOfferForUser: async function(remoteUserId, iceRestart) {
+          const uid = String(remoteUserId);
+          const peer = getOrCreatePeer(uid);
           try {
-            const uid = String(remoteUserId);
             if (!localStream) {
               localStream = await getMediaStream();
             }
-            const peer = getOrCreatePeer(uid);
             syncLocalTracksToPeer(peer);
             if (peer.pc.signalingState !== 'stable' && !iceRestart) {
               return;
             }
+            peer.makingOffer = true;
             const offer = await peer.pc.createOffer({
               offerToReceiveAudio: true,
               offerToReceiveVideo: true,
@@ -431,6 +438,8 @@
             }
           } catch (e) {
             console.error('Failed to create WebRTC offer for', remoteUserId, e);
+          } finally {
+            peer.makingOffer = false;
           }
         },
 
@@ -466,7 +475,24 @@
             const peer = getOrCreatePeer(fromUser);
             syncLocalTracksToPeer(peer);
 
+            const isPolite = myUserId.localeCompare(fromUser) < 0;
+            const offerCollision = (signal.type === 'offer') &&
+              (peer.makingOffer || peer.pc.signalingState !== 'stable');
+
             if (signal.type === 'offer') {
+              if (offerCollision) {
+                if (!isPolite) {
+                  console.log('WebRTC: Impolite peer ignoring offer collision from', fromUser);
+                  return;
+                }
+                console.log('WebRTC: Polite peer rolling back for incoming offer from', fromUser);
+                try {
+                  await peer.pc.setLocalDescription({ type: 'rollback' });
+                } catch (rbErr) {
+                  console.warn('Rollback warning:', rbErr);
+                }
+              }
+
               await peer.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
 
               // Process any queued ICE candidates
@@ -490,7 +516,7 @@
                 }), fromUser);
               }
             } else if (signal.type === 'answer') {
-              if (peer.pc.signalingState !== 'stable') {
+              if (peer.pc.signalingState === 'have-local-offer') {
                 await peer.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
 
                 // Process any queued ICE candidates

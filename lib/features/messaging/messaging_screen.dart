@@ -38,6 +38,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
   bool _isLoadingGroups = true;
   Map<String, dynamic>? _activeGroup;
   List<Map<String, dynamic>> _groupMessages = [];
+  bool _isSending = false;
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -178,55 +179,61 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
   }
 
   void _sendMessage({String? customText}) async {
+    if (_isSending) return;
     final text = (customText ?? _textController.text).trim();
     if (text.isEmpty) return;
+    _isSending = true;
     _textController.clear();
 
-    if (_selectedTab == ChatTab.direct && _activeConversationId != null) {
-      final tempId = DateTime.now().millisecondsSinceEpoch;
-      setState(() {
-        _messages.add(ChatMessageItem(
-          id: tempId,
-          conversationId: _activeConversationId!,
-          body: text,
-          isRead: false,
-          createdAt: DateTime.now().toIso8601String(),
-          sender: {'id': ref.read(authProvider).user?.id, 'name': 'You'},
-        ));
-      });
-      _scrollToBottom();
-      try {
-        final serverMsg = await _repo.sendMessage(_activeConversationId!, text);
-        if (mounted) {
-          setState(() {
-            final idx = _messages.indexWhere((m) => m.id == tempId);
-            if (idx != -1) {
-              _messages[idx] = serverMsg;
-            } else if (!_messages.any((m) => m.id == serverMsg.id)) {
-              _messages.add(serverMsg);
-            }
-          });
-        }
-      } catch (_) {}
-      _pollMessages();
-      _fetchAiSuggestions();
-    } else if (_selectedTab == ChatTab.groups && _activeGroup != null) {
-      final interviewId = _activeGroup!['id'] as int;
-
-      final sent = await _repo.sendMeetingGroupMessage(interviewId, text);
-      if (mounted) {
-        if (sent != null && sent['message'] is Map) {
-          final newMsg = (sent['message'] as Map).cast<String, dynamic>();
-          setState(() {
-            if (!_groupMessages.any((m) => m['id'] == newMsg['id'])) {
-              _groupMessages.add(newMsg);
-            }
-          });
-        }
+    try {
+      if (_selectedTab == ChatTab.direct && _activeConversationId != null) {
+        final tempId = DateTime.now().millisecondsSinceEpoch;
+        setState(() {
+          _messages.add(ChatMessageItem(
+            id: tempId,
+            conversationId: _activeConversationId!,
+            body: text,
+            isRead: false,
+            createdAt: DateTime.now().toIso8601String(),
+            sender: {'id': ref.read(authProvider).user?.id, 'name': 'You'},
+          ));
+        });
         _scrollToBottom();
-        _pollGroupMessages();
-        _fetchGroupAiSuggestions();
+        try {
+          final serverMsg = await _repo.sendMessage(_activeConversationId!, text);
+          if (mounted) {
+            setState(() {
+              final idx = _messages.indexWhere((m) => m.id == tempId);
+              if (idx != -1) {
+                _messages[idx] = serverMsg;
+              } else if (!_messages.any((m) => m.id == serverMsg.id)) {
+                _messages.add(serverMsg);
+              }
+            });
+          }
+        } catch (_) {}
+        _pollMessages();
+        _fetchAiSuggestions();
+      } else if (_selectedTab == ChatTab.groups && _activeGroup != null) {
+        final interviewId = _activeGroup!['id'] as int;
+
+        final sent = await _repo.sendMeetingGroupMessage(interviewId, text);
+        if (mounted) {
+          if (sent != null && sent['message'] is Map) {
+            final newMsg = (sent['message'] as Map).cast<String, dynamic>();
+            setState(() {
+              if (!_groupMessages.any((m) => m['id'] == newMsg['id'])) {
+                _groupMessages.add(newMsg);
+              }
+            });
+          }
+          _scrollToBottom();
+          _pollGroupMessages();
+          _fetchGroupAiSuggestions();
+        }
       }
+    } finally {
+      _isSending = false;
     }
   }
 

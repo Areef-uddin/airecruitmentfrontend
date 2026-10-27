@@ -57,8 +57,8 @@ class WebRTCWebServiceImpl implements WebRTCService {
     final viewId = 'remote-video-$userId-$timestamp';
     final videoElem = html.VideoElement()
       ..autoplay = true
-      ..muted = false // Remote stream must be unmuted so participant voice plays clearly
-      ..volume = 1.0
+      ..muted = true // Kept muted so browser guarantees smooth 60fps video autoplay without gesture lock. Audio is played unmuted via dedicated <audio> element and WebAudio.
+      ..volume = 0.0
       ..setAttribute('playsinline', 'true')
       ..setAttribute('webkit-playsinline', 'true')
       ..style.width = '100%'

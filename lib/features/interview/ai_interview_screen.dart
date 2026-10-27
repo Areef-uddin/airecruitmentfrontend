@@ -55,6 +55,11 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
 
   // Real-time In-call chat (Two-way)
   final List<Map<String, String>> _chatMessages = [];
+  final Set<String> _seenMessageIds = {};
+  final Set<int> _processedSignalIds = {};
+  bool _isPollingSignals = false;
+  int _lastSendTimestamp = 0;
+  int _localMsgCounter = 0;
   final TextEditingController _chatController = TextEditingController();
   bool _isChatOpen = false;
   int _chatTab = 0; // 0 = Room Chat, 1 = AI Copilot Assistant
@@ -306,11 +311,19 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
             if (_chatMessages.isEmpty && history.isNotEmpty) {
               for (final item in history) {
                 if (item is Map) {
-                  _chatMessages.add({
-                    'sender': item['sender']?.toString() ?? 'Participant',
-                    'text': item['text']?.toString() ?? '',
-                    'time': item['time']?.toString() ?? '',
-                  });
+                  final text = item['text']?.toString() ?? item['body']?.toString() ?? '';
+                  final sender = item['sender']?.toString() ?? 'Participant';
+                  final time = item['time']?.toString() ?? '';
+                  final id = item['id']?.toString() ?? '';
+                  if (text.isNotEmpty) {
+                    if (id.isNotEmpty) _seenMessageIds.add(id);
+                    _chatMessages.add({
+                      'id': id,
+                      'sender': sender,
+                      'text': text,
+                      'time': time,
+                    });
+                  }
                 }
               }
             }
@@ -362,6 +375,8 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   }
 
   void _pollSignals() async {
+    if (_isPollingSignals) return;
+    _isPollingSignals = true;
     try {
       final signals = await _interviewRepo.getSignals(
         room: _roomId,
@@ -371,8 +386,12 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
 
       for (final sig in signals) {
         final sigId = sig['id'] as int? ?? 0;
-        if (sigId > _lastSignalId) {
-          _lastSignalId = sigId;
+        if (sigId > 0) {
+          if (_processedSignalIds.contains(sigId)) continue;
+          _processedSignalIds.add(sigId);
+          if (sigId > _lastSignalId) {
+            _lastSignalId = sigId;
+          }
         }
         final sigType = sig['type']?.toString() ?? 'webrtc';
         final payload = sig['payload'];
@@ -396,7 +415,10 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           _handleIncomingCaption(payload);
         }
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _isPollingSignals = false;
+    }
   }
 
   void _handleIncomingCaption(dynamic payload) {
@@ -443,6 +465,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     Map<String, String> msg = {};
     if (payload is Map) {
       msg = {
+        'id': payload['id']?.toString() ?? '',
         'sender': payload['sender']?.toString() ?? 'Participant',
         'text': payload['text']?.toString() ?? '',
         'time': payload['time']?.toString() ?? '',
@@ -451,26 +474,49 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       try {
         final decoded = jsonDecode(payload);
         msg = {
+          'id': decoded['id']?.toString() ?? '',
           'sender': decoded['sender']?.toString() ?? 'Participant',
           'text': decoded['text']?.toString() ?? '',
           'time': decoded['time']?.toString() ?? '',
         };
       } catch (_) {
-        msg = {'sender': 'Participant', 'text': payload, 'time': ''};
+        msg = {'id': '', 'sender': 'Participant', 'text': payload, 'time': ''};
       }
     }
 
-    if (msg['text']?.isNotEmpty ?? false) {
-      final user = ref.read(authProvider).user;
-      final myName = user?.fullName ?? user?.email ?? 'Me';
-      final isMyEcho = msg['sender'] == myName && _chatMessages.isNotEmpty && _chatMessages.last['text'] == msg['text'];
-      if (!isMyEcho) {
-        if (mounted) {
-          setState(() {
-            _chatMessages.add(msg);
-          });
-        }
-      }
+    final text = (msg['text'] ?? '').trim();
+    if (text.isEmpty) return;
+
+    final user = ref.read(authProvider).user;
+    final myName = user?.fullName ?? user?.email ?? 'Me';
+    final msgId = msg['id'] ?? '';
+
+    // 1. If unique message ID already processed, skip
+    if (msgId.isNotEmpty && _seenMessageIds.contains(msgId)) {
+      return;
+    }
+
+    // 2. Prevent echo of message sent by current user
+    final isMyEcho = (msg['sender'] == myName || msg['sender'] == 'Me') &&
+        _chatMessages.any((m) =>
+            (msgId.isNotEmpty && m['id'] == msgId) ||
+            (m['text'] == text && (m['sender'] == myName || m['sender'] == 'Me')));
+    if (isMyEcho) return;
+
+    // 3. Deduplicate exact same message from same sender
+    final isDuplicate = _chatMessages.any((m) =>
+        (msgId.isNotEmpty && m['id'] == msgId) ||
+        (m['sender'] == msg['sender'] && m['text'] == text && m['time'] == msg['time']));
+    if (isDuplicate) return;
+
+    if (msgId.isNotEmpty) {
+      _seenMessageIds.add(msgId);
+    }
+
+    if (mounted) {
+      setState(() {
+        _chatMessages.add(msg);
+      });
     }
   }
 
@@ -660,18 +706,26 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   }
 
   void _sendMessage({String? customText}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastSendTimestamp < 350) return; // Prevent double tap/enter
+    _lastSendTimestamp = now;
+
     final text = (customText ?? _chatController.text).trim();
     if (text.isEmpty) return;
 
     final user = ref.read(authProvider).user;
     final senderName = user?.fullName ?? user?.email ?? 'Me';
     final timeStr = '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}';
+    final msgId = 'msg_${now}_${_myParticipantId}_${_localMsgCounter++}';
 
     final msg = {
+      'id': msgId,
       'sender': senderName,
       'text': text,
       'time': timeStr,
     };
+
+    _seenMessageIds.add(msgId);
 
     setState(() {
       _chatMessages.add(msg);
