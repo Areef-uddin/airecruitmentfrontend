@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
@@ -16,6 +15,7 @@ import '../../providers/job_provider.dart';
 import 'package:intl/intl.dart';
 import '../../models/interview_model.dart';
 import '../../repositories/interview_repository.dart';
+import '../../core/config/api_config.dart';
 
 class CandidateDashboardScreen extends ConsumerStatefulWidget {
   const CandidateDashboardScreen({super.key});

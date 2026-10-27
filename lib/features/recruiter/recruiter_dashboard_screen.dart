@@ -11,11 +11,11 @@ import '../../shared/widgets/app_button.dart';
 import '../../shared/widgets/status_badge.dart';
 import '../../providers/auth_provider.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import '../../repositories/recruiter_repository.dart';
 import '../../repositories/interview_repository.dart';
 import '../../models/interview_model.dart';
+import '../../core/config/api_config.dart';
 
 class RecruiterDashboardScreen extends ConsumerStatefulWidget {
   const RecruiterDashboardScreen({super.key});
