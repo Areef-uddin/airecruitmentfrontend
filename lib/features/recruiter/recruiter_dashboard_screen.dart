@@ -12,6 +12,7 @@ import '../../shared/widgets/status_badge.dart';
 import '../../providers/auth_provider.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 import '../../repositories/recruiter_repository.dart';
 import '../../repositories/interview_repository.dart';
 import '../../models/interview_model.dart';
@@ -447,6 +448,31 @@ class _RecruiterDashboardScreenState extends ConsumerState<RecruiterDashboardScr
                                                 'Candidate: ${it.application?.candidate?.fullName ?? it.application?.candidate?.email ?? "Candidate"} • Room: interview_${it.id}',
                                                 style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                                               ),
+                                              const SizedBox(height: 4),
+                                              Wrap(
+                                                spacing: 8,
+                                                runSpacing: 4,
+                                                crossAxisAlignment: WrapCrossAlignment.center,
+                                                children: [
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: it.status.toUpperCase() == 'COMPLETED' ? const Color(0xFF10B981).withOpacity(0.15) : const Color(0xFFD946EF).withOpacity(0.15),
+                                                      borderRadius: BorderRadius.circular(6),
+                                                      border: Border.all(color: it.status.toUpperCase() == 'COMPLETED' ? const Color(0xFF10B981).withOpacity(0.3) : const Color(0xFFD946EF).withOpacity(0.3)),
+                                                    ),
+                                                    child: Text(
+                                                      it.status.toUpperCase() == 'COMPLETED' ? '✅ Concluded' : '🔴 Active Session',
+                                                      style: TextStyle(
+                                                        color: it.status.toUpperCase() == 'COMPLETED' ? const Color(0xFF10B981) : const Color(0xFFD946EF),
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Text('📅 ${DateFormat('dd/MM/yyyy • hh:mm a').format(it.scheduledDateTime)}', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                                                ],
+                                              ),
                                             ],
                                           ),
                                         ),
@@ -472,17 +498,35 @@ class _RecruiterDashboardScreenState extends ConsumerState<RecruiterDashboardScr
                                             label: const Text('Share Link', style: TextStyle(fontSize: 11)),
                                           ),
                                           const SizedBox(width: 8),
-                                          ElevatedButton.icon(
-                                            onPressed: () => context.go(roomTarget),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: const Color(0xFF10B981),
-                                              foregroundColor: Colors.white,
-                                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          if (it.status.toUpperCase() == 'COMPLETED')
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF1E2030),
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: const Color(0xFF2E324D)),
+                                              ),
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.check_circle_outline, size: 14, color: Color(0xFF10B981)),
+                                                  SizedBox(width: 4),
+                                                  Text('Concluded', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 11)),
+                                                ],
+                                              ),
+                                            )
+                                          else
+                                            ElevatedButton.icon(
+                                              onPressed: () => context.go(roomTarget),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: const Color(0xFF10B981),
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                              ),
+                                              icon: const Icon(Icons.login, size: 16),
+                                              label: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                                             ),
-                                            icon: const Icon(Icons.login, size: 16),
-                                            label: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                          ),
                                         ],
                                       ],
                                     ),
@@ -513,19 +557,34 @@ class _RecruiterDashboardScreenState extends ConsumerState<RecruiterDashboardScr
                                             ),
                                           ),
                                           const SizedBox(width: 8),
-                                          Expanded(
-                                            child: ElevatedButton.icon(
-                                              onPressed: () => context.go(roomTarget),
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: const Color(0xFF10B981),
-                                                foregroundColor: Colors.white,
-                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          if (it.status.toUpperCase() == 'COMPLETED')
+                                            Expanded(
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF1E2030),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  border: Border.all(color: const Color(0xFF2E324D)),
+                                                ),
+                                                child: const Center(
+                                                  child: Text('Concluded', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 11)),
+                                                ),
                                               ),
-                                              icon: const Icon(Icons.login, size: 14),
-                                              label: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                            )
+                                          else
+                                            Expanded(
+                                              child: ElevatedButton.icon(
+                                                onPressed: () => context.go(roomTarget),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: const Color(0xFF10B981),
+                                                  foregroundColor: Colors.white,
+                                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                ),
+                                                icon: const Icon(Icons.login, size: 14),
+                                                label: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                              ),
                                             ),
-                                          ),
                                         ],
                                       ),
                                     ],

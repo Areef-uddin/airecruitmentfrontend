@@ -254,6 +254,123 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     });
   }
 
+  void _showRenameGroupDialog() {
+    if (_activeGroup == null) return;
+    final titleCtrl = TextEditingController(text: _activeGroup!['title'] ?? '');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2030),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.edit, color: Color(0xFFD946EF), size: 20),
+            SizedBox(width: 8),
+            Text('Rename Meeting Group', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: TextField(
+          controller: titleCtrl,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: InputDecoration(
+            labelText: 'Group Name',
+            labelStyle: const TextStyle(color: Color(0xFF94A3B8)),
+            filled: true,
+            fillColor: const Color(0xFF13141F),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.white))),
+          ElevatedButton(
+            onPressed: () async {
+              final newTitle = titleCtrl.text.trim();
+              if (newTitle.isNotEmpty) {
+                Navigator.pop(ctx);
+                final interviewId = _activeGroup!['id'] as int;
+                setState(() {
+                  _activeGroup!['title'] = newTitle;
+                });
+                await _repo.updateMeetingGroup(interviewId: interviewId, title: newTitle);
+                _fetchMeetingGroups();
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD946EF)),
+            child: const Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddFriendDialog() {
+    if (_activeGroup == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2030),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.person_add_alt_1, color: Color(0xFF38BDF8), size: 20),
+            SizedBox(width: 8),
+            Text('Add Friend to Group', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SizedBox(
+          width: 360,
+          child: _contacts.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No contacts available to add.', style: TextStyle(color: Color(0xFF94A3B8))),
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _contacts.length,
+                  separatorBuilder: (_, __) => const Divider(color: Color(0xFF2E324D), height: 1),
+                  itemBuilder: (context, idx) {
+                    final c = _contacts[idx];
+                    return ListTile(
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      leading: CircleAvatar(
+                        radius: 14,
+                        backgroundColor: AppColors.primary,
+                        child: Text(c.name.isNotEmpty ? c.name[0].toUpperCase() : 'U', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                      ),
+                      title: Text(c.name, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                      subtitle: Text(c.headline, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10)),
+                      trailing: ElevatedButton(
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          final interviewId = _activeGroup!['id'] as int;
+                          await _repo.updateMeetingGroup(interviewId: interviewId, addUserId: c.id);
+                          _fetchMeetingGroups();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: const Color(0xFF10B981),
+                              content: Text('${c.name} added to this group!'),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF38BDF8),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        ),
+                        child: const Text('Add', style: TextStyle(fontSize: 11, color: Colors.black, fontWeight: FontWeight.bold)),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close', style: TextStyle(color: Colors.white))),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).user;
@@ -732,11 +849,30 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_activeGroup!['title'] ?? 'Meeting Group', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(_activeGroup!['title'] ?? 'Meeting Group', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit, size: 14, color: Color(0xFFD946EF)),
+                          tooltip: 'Rename Group',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: _showRenameGroupDialog,
+                        ),
+                      ],
+                    ),
                     Text('$role • $company', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
                   ],
                 ),
               ),
+              IconButton(
+                icon: const Icon(Icons.person_add_alt_1, size: 18, color: Color(0xFF38BDF8)),
+                tooltip: 'Add Friend / Candidate to Group',
+                onPressed: _showAddFriendDialog,
+              ),
+              const SizedBox(width: 6),
               ElevatedButton.icon(
                 onPressed: () => context.go('/live-interview?room=$roomId&id=${_activeGroup!['id']}'),
                 style: ElevatedButton.styleFrom(

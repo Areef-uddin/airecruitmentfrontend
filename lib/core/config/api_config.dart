@@ -74,6 +74,7 @@ class ApiConfig {
   static const String aiGenerateJobDesc = '/ai/generate-job-description/';
   static const String aiMatchCandidate = '/ai/match-candidate/';
   static const String aiGenerateQuestions = '/ai/generate-interview-questions/';
+  static const String aiGenerateQuizzes = '/ai/generate-quizzes/';
   static const String aiAssistant = '/ai/assistant/';
   static const String aiTranslate = '/ai/translate/';
   static const String aiImproveText = '/ai/improve-text/';

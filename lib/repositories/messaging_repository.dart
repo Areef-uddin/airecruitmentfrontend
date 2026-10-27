@@ -150,11 +150,27 @@ class MessagingRepository {
     try {
       final response = await _dio.post(
         ApiConfig.chatMeetingGroups,
-        data: {'interview_id': interviewId, 'body': body},
+        data: {'interview_id': interviewId, 'text': body},
       );
       return response.data;
     } catch (_) {
       return null;
+    }
+  }
+
+  Future<bool> updateMeetingGroup({required int interviewId, String? title, int? addUserId}) async {
+    try {
+      await _dio.patch(
+        ApiConfig.chatMeetingGroups,
+        data: {
+          'interview_id': interviewId,
+          if (title != null && title.isNotEmpty) 'title': title,
+          if (addUserId != null) 'add_user_id': addUserId,
+        },
+      );
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 }

@@ -13,6 +13,7 @@ import '../../shared/widgets/app_button.dart';
 import '../../shared/widgets/score_gauge.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/job_provider.dart';
+import 'package:intl/intl.dart';
 import '../../models/interview_model.dart';
 import '../../repositories/interview_repository.dart';
 
@@ -231,9 +232,29 @@ class _CandidateDashboardScreenState extends ConsumerState<CandidateDashboardScr
                                             children: [
                                               Text(it.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                                               const SizedBox(height: 4),
-                                              Text(
-                                                'Status: ${it.status} • Duration: ${it.durationMinutes} mins',
-                                                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                              Wrap(
+                                                spacing: 8,
+                                                runSpacing: 4,
+                                                crossAxisAlignment: WrapCrossAlignment.center,
+                                                children: [
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: it.status.toUpperCase() == 'COMPLETED' ? const Color(0xFF10B981).withOpacity(0.15) : const Color(0xFFD946EF).withOpacity(0.15),
+                                                      borderRadius: BorderRadius.circular(6),
+                                                      border: Border.all(color: it.status.toUpperCase() == 'COMPLETED' ? const Color(0xFF10B981).withOpacity(0.3) : const Color(0xFFD946EF).withOpacity(0.3)),
+                                                    ),
+                                                    child: Text(
+                                                      it.status.toUpperCase() == 'COMPLETED' ? '✅ Concluded (Ended by Recruiter)' : '🔴 Scheduled / Active',
+                                                      style: TextStyle(
+                                                        color: it.status.toUpperCase() == 'COMPLETED' ? const Color(0xFF10B981) : const Color(0xFFD946EF),
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Text('📅 ${DateFormat('dd/MM/yyyy • hh:mm a').format(it.scheduledDateTime)}', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                                                ],
                                               ),
                                               if (it.aiScore != null) ...[
                                                 const SizedBox(height: 6),
@@ -264,17 +285,35 @@ class _CandidateDashboardScreenState extends ConsumerState<CandidateDashboardScr
                                             label: const Text('Share Link', style: TextStyle(fontSize: 12)),
                                           ),
                                           const SizedBox(width: 10),
-                                          ElevatedButton.icon(
-                                            onPressed: () => context.go(roomTarget),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: const Color(0xFFD946EF),
-                                              foregroundColor: Colors.white,
-                                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          if (it.status.toUpperCase() == 'COMPLETED')
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF1E2030),
+                                                borderRadius: BorderRadius.circular(10),
+                                                border: Border.all(color: const Color(0xFF2E324D)),
+                                              ),
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.lock_clock, size: 16, color: Color(0xFF94A3B8)),
+                                                  SizedBox(width: 6),
+                                                  Text('Meeting Concluded (No Rejoin)', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.bold)),
+                                                ],
+                                              ),
+                                            )
+                                          else
+                                            ElevatedButton.icon(
+                                              onPressed: () => context.go(roomTarget),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: const Color(0xFFD946EF),
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                              ),
+                                              icon: const Icon(Icons.login, size: 18),
+                                              label: const Text('Join / Rejoin Room', style: TextStyle(fontWeight: FontWeight.bold)),
                                             ),
-                                            icon: const Icon(Icons.login, size: 18),
-                                            label: const Text('Join Interview Room', style: TextStyle(fontWeight: FontWeight.bold)),
-                                          ),
                                         ],
                                       ],
                                     ),
@@ -305,19 +344,34 @@ class _CandidateDashboardScreenState extends ConsumerState<CandidateDashboardScr
                                             ),
                                           ),
                                           const SizedBox(width: 8),
-                                          Expanded(
-                                            child: ElevatedButton.icon(
-                                              onPressed: () => context.go(roomTarget),
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: const Color(0xFFD946EF),
-                                                foregroundColor: Colors.white,
-                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          if (it.status.toUpperCase() == 'COMPLETED')
+                                            Expanded(
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF1E2030),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  border: Border.all(color: const Color(0xFF2E324D)),
+                                                ),
+                                                child: const Center(
+                                                  child: Text('Concluded • No Rejoin', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.bold)),
+                                                ),
                                               ),
-                                              icon: const Icon(Icons.login, size: 16),
-                                              label: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                            )
+                                          else
+                                            Expanded(
+                                              child: ElevatedButton.icon(
+                                                onPressed: () => context.go(roomTarget),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: const Color(0xFFD946EF),
+                                                  foregroundColor: Colors.white,
+                                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                ),
+                                                icon: const Icon(Icons.login, size: 16),
+                                                label: const Text('Join / Rejoin', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                              ),
                                             ),
-                                          ),
                                         ],
                                       ),
                                     ],

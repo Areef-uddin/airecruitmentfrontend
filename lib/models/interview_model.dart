@@ -41,6 +41,8 @@ class InterviewModel {
   final String? aiFeedback;
   final List<TranscriptEntry> transcript;
   List<Map<String, dynamic>> get aiTranscript => transcript.map((t) => t.toJson()).toList();
+  DateTime get scheduledDateTime => DateTime.tryParse(scheduledAt) ?? DateTime.now();
+  int? get candidateId => application?.candidate?.id;
 
   InterviewModel({
     required this.id,

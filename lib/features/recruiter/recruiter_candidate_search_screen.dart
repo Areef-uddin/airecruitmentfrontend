@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/responsive/responsive_layout.dart';
@@ -28,6 +29,7 @@ class _RecruiterCandidateSearchScreenState extends ConsumerState<RecruiterCandid
   List<JobModel> _recruiterJobs = [];
   final Set<int> _invitedCandidateIds = {};
   final Map<int, String> _candidateMeetingLinks = {};
+  final Map<int, DateTime> _candidateInviteDates = {};
 
   final InterviewRepository _interviewRepo = InterviewRepository();
   final JobRepository _jobRepo = JobRepository();
@@ -36,7 +38,29 @@ class _RecruiterCandidateSearchScreenState extends ConsumerState<RecruiterCandid
   void initState() {
     super.initState();
     _loadJobs();
+    _loadExistingInterviews();
     _search();
+  }
+
+  void _loadExistingInterviews() async {
+    try {
+      final interviews = await _interviewRepo.getInterviews();
+      if (mounted) {
+        setState(() {
+          for (final it in interviews) {
+            final candId = it.candidateId;
+            if (candId != null) {
+              _invitedCandidateIds.add(candId);
+              _candidateInviteDates[candId] = it.scheduledDateTime;
+              final target = it.meetingLink.isNotEmpty
+                  ? (it.meetingLink.contains('id=') ? it.meetingLink : '${it.meetingLink}&id=${it.id}')
+                  : '/live-interview?room=interview_${it.id}&id=${it.id}';
+              _candidateMeetingLinks[candId] = target;
+            }
+          }
+        });
+      }
+    } catch (_) {}
   }
 
   void _loadJobs() async {
@@ -179,6 +203,7 @@ class _RecruiterCandidateSearchScreenState extends ConsumerState<RecruiterCandid
                             setState(() {
                               if (candKey != null) {
                                 _invitedCandidateIds.add(candKey);
+                                _candidateInviteDates[candKey] = DateTime.now();
                                 _candidateMeetingLinks[candKey] = target;
                               }
                             });
@@ -348,6 +373,9 @@ class _RecruiterCandidateSearchScreenState extends ConsumerState<RecruiterCandid
                                                         final target = (candKey != null ? _candidateMeetingLinks[candKey] : null) ?? '/live-interview';
 
                                                         if (isInvited) {
+                                                          final inviteDate = _candidateInviteDates[candKey];
+                                                          final dateStr = inviteDate != null ? DateFormat('dd/MM/yyyy • hh:mm a').format(inviteDate) : '';
+
                                                           return Row(
                                                             mainAxisSize: MainAxisSize.min,
                                                             children: [
@@ -358,12 +386,12 @@ class _RecruiterCandidateSearchScreenState extends ConsumerState<RecruiterCandid
                                                                   borderRadius: BorderRadius.circular(8),
                                                                   border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
                                                                 ),
-                                                                child: const Row(
+                                                                child: Row(
                                                                   mainAxisSize: MainAxisSize.min,
                                                                   children: [
-                                                                    Icon(Icons.check_circle, size: 14, color: Color(0xFF10B981)),
-                                                                    SizedBox(width: 4),
-                                                                    Text('Invited', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 11)),
+                                                                    const Icon(Icons.check_circle, size: 14, color: Color(0xFF10B981)),
+                                                                    const SizedBox(width: 4),
+                                                                    Text(dateStr.isNotEmpty ? 'Invited • $dateStr' : 'Invited', style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 11)),
                                                                   ],
                                                                 ),
                                                               ),
@@ -473,21 +501,28 @@ class _RecruiterCandidateSearchScreenState extends ConsumerState<RecruiterCandid
                                                 const SizedBox(height: 12),
                                                 Row(
                                                   children: [
-                                                    Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                                      decoration: BoxDecoration(
-                                                        color: const Color(0xFF10B981).withOpacity(0.18),
-                                                        borderRadius: BorderRadius.circular(8),
-                                                        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
-                                                      ),
-                                                      child: const Row(
-                                                        mainAxisSize: MainAxisSize.min,
-                                                        children: [
-                                                          Icon(Icons.check_circle, size: 14, color: Color(0xFF10B981)),
-                                                          SizedBox(width: 4),
-                                                          Text('Invited', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 11)),
-                                                        ],
-                                                      ),
+                                                    Builder(
+                                                      builder: (context) {
+                                                        final inviteDate = _candidateInviteDates[candKey];
+                                                        final dateStr = inviteDate != null ? DateFormat('dd/MM/yyyy • hh:mm a').format(inviteDate) : '';
+
+                                                        return Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                                          decoration: BoxDecoration(
+                                                            color: const Color(0xFF10B981).withOpacity(0.18),
+                                                            borderRadius: BorderRadius.circular(8),
+                                                            border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+                                                          ),
+                                                          child: Row(
+                                                            mainAxisSize: MainAxisSize.min,
+                                                            children: [
+                                                              const Icon(Icons.check_circle, size: 14, color: Color(0xFF10B981)),
+                                                              const SizedBox(width: 4),
+                                                              Text(dateStr.isNotEmpty ? 'Invited • $dateStr' : 'Invited', style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 11)),
+                                                            ],
+                                                          ),
+                                                        );
+                                                      },
                                                     ),
                                                     const SizedBox(width: 8),
                                                     Expanded(

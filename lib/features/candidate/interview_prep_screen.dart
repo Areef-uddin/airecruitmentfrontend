@@ -25,6 +25,12 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
   late TabController _tabController;
   late final WebRTCService _webrtcService;
 
+  // --- CUSTOM USER TYPED ROLE & SENIORITY (GEMINI GROUNDED) ---
+  final TextEditingController _customRoleController = TextEditingController(text: 'Senior Full Stack Flutter & Django Engineer');
+  final TextEditingController _customSeniorityController = TextEditingController(text: 'Senior (5+ yrs)');
+  List<Map<String, dynamic>> _dynamicQuizzes = [];
+  bool _isGeneratingQuizzes = false;
+
   // --- QUIZ STATE ---
   String _selectedTrack = 'Flutter & Dart';
   String _selectedLevel = 'Senior (5+ yrs)';
@@ -253,9 +259,74 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
   void dispose() {
     _tabController.dispose();
     _quizTimer?.cancel();
+    _customRoleController.dispose();
+    _customSeniorityController.dispose();
     _candidateAnswerController.dispose();
     _webrtcService.stopSpeaking();
     super.dispose();
+  }
+
+  List<Map<String, dynamic>> _getActiveQuizList() {
+    if (_dynamicQuizzes.isNotEmpty) return _dynamicQuizzes;
+    return _quizzesByTrack[_selectedTrack] ?? _quizzesByTrack['Flutter & Dart']!;
+  }
+
+  Future<void> _generateGeminiQuizzes() async {
+    final role = _customRoleController.text.trim().isNotEmpty
+        ? _customRoleController.text.trim()
+        : _selectedTrack;
+    final seniority = _customSeniorityController.text.trim().isNotEmpty
+        ? _customSeniorityController.text.trim()
+        : _selectedLevel;
+
+    setState(() => _isGeneratingQuizzes = true);
+
+    try {
+      final dio = ApiClient().dio;
+      final res = await dio.post(
+        ApiConfig.aiGenerateQuizzes,
+        data: {
+          'role': role,
+          'seniority': seniority,
+          'resume_text': _candidateResumeSummary,
+        },
+      );
+
+      final list = res.data['quizzes'] as List? ?? [];
+      if (list.isNotEmpty) {
+        final parsed = list.map((item) {
+          final qMap = item as Map<String, dynamic>;
+          final rawOptions = qMap['options'] as List? ?? [];
+          final options = rawOptions.map((o) => o.toString()).toList();
+          return {
+            'question': qMap['question']?.toString() ?? '',
+            'options': options,
+            'correct': (qMap['correct'] as num?)?.toInt() ?? 0,
+            'explanation': qMap['explanation']?.toString() ?? '',
+          };
+        }).where((q) => (q['question'] as String).isNotEmpty && (q['options'] as List).isNotEmpty).toList();
+
+        if (parsed.isNotEmpty) {
+          setState(() {
+            _dynamicQuizzes = parsed;
+            _isGeneratingQuizzes = false;
+          });
+          _startQuiz();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: const Color(0xFF10B981),
+                content: Text('✨ Gemini generated ${parsed.length} tailored technical MCQs for "$role"!'),
+              ),
+            );
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+
+    setState(() => _isGeneratingQuizzes = false);
+    _startQuiz();
   }
 
   void _startQuiz() {
@@ -293,7 +364,7 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
     if (_hasSubmittedAnswer) return;
     _quizTimer?.cancel();
 
-    final questions = _quizzesByTrack[_selectedTrack] ?? [];
+    final questions = _getActiveQuizList();
     if (questions.isEmpty) return;
     final currentQ = questions[_currentQuestionIndex];
     final isCorrect = _selectedAnswerIndex == currentQ['correct'];
@@ -305,7 +376,7 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
   }
 
   void _nextQuestion() {
-    final questions = _quizzesByTrack[_selectedTrack] ?? [];
+    final questions = _getActiveQuizList();
     if (_currentQuestionIndex + 1 < questions.length) {
       setState(() {
         _currentQuestionIndex++;
@@ -324,13 +395,20 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
 
   // --- MOCK VOICE INTERVIEW LOGIC (GEMINI POWERED) ---
   void _startMockInterview() async {
+    final role = _customRoleController.text.trim().isNotEmpty
+        ? _customRoleController.text.trim()
+        : _selectedTrack;
+    final seniority = _customSeniorityController.text.trim().isNotEmpty
+        ? _customSeniorityController.text.trim()
+        : _selectedLevel;
+
     setState(() {
       _isMockActive = true;
       _isLoadingQuestions = true;
       _mockQuestionIndex = 0;
       _mockHistory.clear();
       _mockScore = 0;
-      _mockFeedback = 'AI Nora is reviewing your resume & creating tailored technical interview questions...';
+      _mockFeedback = 'AI Nora is reviewing your resume & crafting live conversational questions for $role ($seniority)...';
     });
 
     try {
@@ -338,8 +416,8 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
       final res = await dio.post(
         ApiConfig.aiGenerateQuestions,
         data: {
-          'title': _selectedTrack,
-          'difficulty': _selectedLevel,
+          'title': role,
+          'difficulty': seniority,
           'resume_text': _candidateResumeSummary,
         },
       );
@@ -358,11 +436,11 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
 
     setState(() {
       _isLoadingQuestions = false;
-      _mockFeedback = 'AI Nora is ready with personalized questions tailored to your profile and $_selectedTrack.';
+      _mockFeedback = 'AI Nora is ready with personalized questions tailored to your profile and $role.';
     });
 
     final firstQ = _dynamicMockQuestions[0];
-    _noraSpeak("Welcome to your mock interview session! I'm Nora. Based on your experience and claimed projects in $_selectedTrack, let's explore our first question: $firstQ");
+    _noraSpeak("Welcome to your mock interview session for $role! I'm Nora, your autonomous AI interviewer. Based on your submitted resume and technical expertise, let's explore our first question: $firstQ");
   }
 
   void _noraSpeak(String text) {
@@ -532,58 +610,178 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
                             ),
                             const SizedBox(height: 24),
 
-                            // Track & Experience Selectors
+                            // Custom Typed Target Role & Seniority Selectors (Gemini Grounded)
                             AppCard(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                              child: Wrap(
-                                spacing: 20,
-                                runSpacing: 12,
-                                crossAxisAlignment: WrapCrossAlignment.center,
+                              padding: const EdgeInsets.all(20),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
-                                    mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.code, size: 16, color: AppColors.primary),
-                                      const SizedBox(width: 8),
-                                      const Text('Track: ', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.bold)),
-                                      DropdownButton<String>(
-                                        value: _selectedTrack,
-                                        dropdownColor: const Color(0xFF1E2030),
-                                        underline: const SizedBox(),
-                                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                                        items: _tracks.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                                        onChanged: (val) {
-                                          if (val != null) {
-                                            setState(() {
-                                              _selectedTrack = val;
-                                              _startQuiz();
-                                            });
-                                          }
-                                        },
+                                      Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFD946EF).withOpacity(0.18),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.auto_awesome, color: Color(0xFFD946EF), size: 18),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      const Text(
+                                        'Target Role & Seniority Configuration',
+                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                                       ),
                                     ],
                                   ),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'Type any technical role and experience level. Google Gemini analyzes your submitted resume and generates dynamic technical MCQs or voice mock questions.',
+                                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 16),
+
+                                  // Inputs Row
+                                  if (isDesktop)
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          flex: 3,
+                                          child: TextField(
+                                            controller: _customRoleController,
+                                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                                            decoration: InputDecoration(
+                                              labelText: 'Target Job Role / Title',
+                                              hintText: 'e.g. Lead Flutter Architect, Python Backend Lead...',
+                                              labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                              prefixIcon: const Icon(Icons.work_outline, color: AppColors.primary, size: 18),
+                                              filled: true,
+                                              fillColor: const Color(0xFF13141F),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E324D))),
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 14),
+                                        Expanded(
+                                          flex: 2,
+                                          child: TextField(
+                                            controller: _customSeniorityController,
+                                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                                            decoration: InputDecoration(
+                                              labelText: 'Seniority Level / Experience',
+                                              hintText: 'e.g. Senior (5+ yrs), Lead...',
+                                              labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                              prefixIcon: const Icon(Icons.stairs_outlined, color: Color(0xFFD946EF), size: 18),
+                                              filled: true,
+                                              fillColor: const Color(0xFF13141F),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E324D))),
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 14),
+                                        ElevatedButton.icon(
+                                          onPressed: _isGeneratingQuizzes ? null : _generateGeminiQuizzes,
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFFD946EF),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          icon: _isGeneratingQuizzes
+                                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                              : const Icon(Icons.auto_awesome, size: 16),
+                                          label: Text(_isGeneratingQuizzes ? 'Generating...' : '✨ Generate with Gemini', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        ),
+                                      ],
+                                    )
+                                  else
+                                    Column(
+                                      children: [
+                                        TextField(
+                                          controller: _customRoleController,
+                                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                                          decoration: InputDecoration(
+                                            labelText: 'Target Job Role / Title',
+                                            hintText: 'e.g. Lead Flutter Architect...',
+                                            labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                            prefixIcon: const Icon(Icons.work_outline, color: AppColors.primary, size: 18),
+                                            filled: true,
+                                            fillColor: const Color(0xFF13141F),
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        TextField(
+                                          controller: _customSeniorityController,
+                                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                                          decoration: InputDecoration(
+                                            labelText: 'Seniority Level / Experience',
+                                            hintText: 'e.g. Senior (5+ yrs)...',
+                                            labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                            prefixIcon: const Icon(Icons.stairs_outlined, color: Color(0xFFD946EF), size: 18),
+                                            filled: true,
+                                            fillColor: const Color(0xFF13141F),
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: ElevatedButton.icon(
+                                            onPressed: _isGeneratingQuizzes ? null : _generateGeminiQuizzes,
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFFD946EF),
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(vertical: 14),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                            ),
+                                            icon: _isGeneratingQuizzes
+                                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                                : const Icon(Icons.auto_awesome, size: 16),
+                                            label: Text(_isGeneratingQuizzes ? 'Generating with Gemini...' : '✨ Generate Quizzes with Gemini', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                  const SizedBox(height: 14),
+                                  // Quick role suggestion tags
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 6,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
                                     children: [
-                                      const Icon(Icons.stairs_outlined, size: 16, color: Color(0xFFD946EF)),
-                                      const SizedBox(width: 8),
-                                      const Text('Seniority: ', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.bold)),
-                                      DropdownButton<String>(
-                                        value: _selectedLevel,
-                                        dropdownColor: const Color(0xFF1E2030),
-                                        underline: const SizedBox(),
-                                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                                        items: _levels.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
-                                        onChanged: (val) {
-                                          if (val != null) {
+                                      const Text('Popular Roles:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.bold)),
+                                      ..._tracks.map((t) {
+                                        return ActionChip(
+                                          backgroundColor: const Color(0xFF1E2030),
+                                          side: BorderSide(color: const Color(0xFF38BDF8).withOpacity(0.3)),
+                                          label: Text(t, style: const TextStyle(color: Color(0xFF38BDF8), fontSize: 11)),
+                                          onPressed: () {
                                             setState(() {
-                                              _selectedLevel = val;
+                                              _selectedTrack = t;
+                                              _customRoleController.text = t;
                                               _startQuiz();
                                             });
-                                          }
-                                        },
-                                      ),
+                                          },
+                                        );
+                                      }),
+                                      const SizedBox(width: 8),
+                                      const Text('Seniority:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.bold)),
+                                      ..._levels.map((l) {
+                                        return ActionChip(
+                                          backgroundColor: const Color(0xFF1E2030),
+                                          side: BorderSide(color: const Color(0xFFD946EF).withOpacity(0.3)),
+                                          label: Text(l, style: const TextStyle(color: Color(0xFFD946EF), fontSize: 11)),
+                                          onPressed: () {
+                                            setState(() {
+                                              _selectedLevel = l;
+                                              _customSeniorityController.text = l;
+                                            });
+                                          },
+                                        );
+                                      }),
                                     ],
                                   ),
                                 ],
@@ -616,7 +814,7 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
 
   // --- QUIZ TAB CONTENT ---
   Widget _buildQuizTab(bool isDesktop) {
-    final questions = _quizzesByTrack[_selectedTrack] ?? [];
+    final questions = _getActiveQuizList();
 
     if (questions.isEmpty) {
       return AppCard(
@@ -856,7 +1054,7 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
             Text('Autonomous AI Mock Voice Interview', style: AppTypography.displaySmall.copyWith(fontSize: 22, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
             const SizedBox(height: 8),
             Text(
-              'Practice realistic technical interviews with AI Nora for "$_selectedTrack" ($_selectedLevel). Nora asks questions aloud using conversational speech synthesis and grades your verbal clarity & technical depth in real-time.',
+              'Practice realistic technical interviews with AI Nora for "${_customRoleController.text.trim().isNotEmpty ? _customRoleController.text.trim() : _selectedTrack}" (${_customSeniorityController.text.trim().isNotEmpty ? _customSeniorityController.text.trim() : _selectedLevel}). Nora asks questions aloud using conversational speech synthesis and grades your verbal clarity & technical depth in real-time.',
               style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14, height: 1.5),
               textAlign: TextAlign.center,
             ),
