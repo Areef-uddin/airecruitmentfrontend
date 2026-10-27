@@ -40,6 +40,7 @@ class InterviewModel {
   final double? aiScore;
   final String? aiFeedback;
   final List<TranscriptEntry> transcript;
+  List<Map<String, dynamic>> get aiTranscript => transcript.map((t) => t.toJson()).toList();
 
   InterviewModel({
     required this.id,

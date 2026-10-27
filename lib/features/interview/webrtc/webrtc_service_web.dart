@@ -42,7 +42,11 @@ class WebRTCWebServiceImpl implements WebRTCService {
   bool get hasRemoteStream => _connectedPeers.isNotEmpty;
 
   @override
-  bool hasRemoteStreamFor(String userId) => _connectedPeers.contains(userId);
+  bool hasRemoteStreamFor(String userId) {
+    if (_connectedPeers.contains(userId)) return true;
+    if (_connectedPeers.isNotEmpty && _connectedPeers.length == 1) return true;
+    return false;
+  }
 
   String _getOrCreateRemoteViewId(String userId) {
     if (_remoteViewIds.containsKey(userId)) {
@@ -363,6 +367,28 @@ class WebRTCWebServiceImpl implements WebRTCService {
       final jsSpeech = js.context['TalentAISpeech'];
       if (jsSpeech != null) {
         jsSpeech.callMethod('stop');
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void speak(String text, {VoidCallback? onStart, VoidCallback? onEnd}) {
+    try {
+      final jsSpeech = js.context['TalentAISpeech'];
+      if (jsSpeech != null) {
+        final onStartJs = onStart != null ? allowInterop((_) => onStart()) : null;
+        final onEndJs = onEnd != null ? allowInterop((_) => onEnd()) : null;
+        jsSpeech.callMethod('speak', [text, onStartJs, onEndJs]);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void stopSpeaking() {
+    try {
+      final jsSpeech = js.context['TalentAISpeech'];
+      if (jsSpeech != null) {
+        jsSpeech.callMethod('stopSpeaking');
       }
     } catch (_) {}
   }

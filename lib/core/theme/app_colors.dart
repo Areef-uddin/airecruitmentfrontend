@@ -23,6 +23,9 @@ class AppColors {
   static const Color accentEmerald = Color(0xFF10B981);
   static const Color accentAmber = Color(0xFFF59E0B);
   static const Color accentRose = Color(0xFFF43F5E);
+  static const Color success = Color(0xFF10B981);
+  static const Color warning = Color(0xFFF59E0B);
+  static const Color error = Color(0xFFF43F5E);
 
   // Text Colors
   static const Color textPrimary = Color(0xFFF8FAFC);

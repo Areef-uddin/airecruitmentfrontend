@@ -39,6 +39,11 @@ class InterviewRepository {
     }
   }
 
+  Future<InterviewModel> getInterview(int id) async {
+    final response = await _dio.get('${ApiConfig.interviews}$id/');
+    return InterviewModel.fromJson(response.data);
+  }
+
   Future<InterviewModel> scheduleInterview({
     int? applicationId,
     int? candidateId,
@@ -236,6 +241,15 @@ class InterviewRepository {
         'Explain a complex technical bug you solved recently and your thought process.',
       ];
     }
+  }
+
+  Future<void> updateInterviewStatus(int id, String status) async {
+    try {
+      await _dio.patch(
+        '${ApiConfig.interviews}$id/',
+        data: {'status': status},
+      );
+    } catch (_) {}
   }
 }
 

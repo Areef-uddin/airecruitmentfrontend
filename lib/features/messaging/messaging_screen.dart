@@ -10,6 +10,8 @@ import '../../shared/widgets/app_card.dart';
 import '../../providers/auth_provider.dart';
 import '../../repositories/messaging_repository.dart';
 
+enum ChatTab { direct, groups }
+
 class MessagingScreen extends ConsumerStatefulWidget {
   final int? initialContactUserId;
   const MessagingScreen({super.key, this.initialContactUserId});
@@ -20,12 +22,23 @@ class MessagingScreen extends ConsumerStatefulWidget {
 
 class _MessagingScreenState extends ConsumerState<MessagingScreen> {
   final MessagingRepository _repo = MessagingRepository();
+
+  ChatTab _selectedTab = ChatTab.direct;
+
+  // Direct chat state
   List<ChatContact> _contacts = [];
   bool _isLoadingContacts = true;
   ChatContact? _activeContact;
   int? _activeConversationId;
   List<ChatMessageItem> _messages = [];
   bool _isLoadingMessages = false;
+
+  // Meeting Group chat state
+  List<Map<String, dynamic>> _meetingGroups = [];
+  bool _isLoadingGroups = true;
+  Map<String, dynamic>? _activeGroup;
+  List<Map<String, dynamic>> _groupMessages = [];
+
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   Timer? _refreshTimer;
@@ -38,9 +51,14 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
   void initState() {
     super.initState();
     _fetchContacts();
+    _fetchMeetingGroups();
+
     _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (_activeConversationId != null && mounted) {
+      if (!mounted) return;
+      if (_selectedTab == ChatTab.direct && _activeConversationId != null) {
         _pollMessages();
+      } else if (_selectedTab == ChatTab.groups && _activeGroup != null) {
+        _pollGroupMessages();
       }
     });
   }
@@ -53,7 +71,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     super.dispose();
   }
 
-  void _fetchContacts() async {
+  Future<void> _fetchContacts() async {
     setState(() => _isLoadingContacts = true);
     final list = await _repo.getContacts();
     if (!mounted) return;
@@ -70,14 +88,29 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
       }
     }
 
-    if (_contacts.isNotEmpty && _activeContact == null && ResponsiveLayout.isDesktop(context)) {
+    if (_contacts.isNotEmpty && _activeContact == null && _selectedTab == ChatTab.direct && ResponsiveLayout.isDesktop(context)) {
       _selectContact(_contacts.first);
+    }
+  }
+
+  Future<void> _fetchMeetingGroups() async {
+    setState(() => _isLoadingGroups = true);
+    final list = await _repo.getMeetingGroups();
+    if (!mounted) return;
+    setState(() {
+      _meetingGroups = list;
+      _isLoadingGroups = false;
+    });
+
+    if (_selectedTab == ChatTab.groups && _meetingGroups.isNotEmpty && _activeGroup == null && ResponsiveLayout.isDesktop(context)) {
+      _selectGroup(_meetingGroups.first);
     }
   }
 
   void _selectContact(ChatContact contact) async {
     setState(() {
       _activeContact = contact;
+      _activeGroup = null;
       _isLoadingMessages = true;
       _aiSuggestions = [];
     });
@@ -100,23 +133,88 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     }
   }
 
-  void _pollMessages() async {
+  void _selectGroup(Map<String, dynamic> group) {
+    setState(() {
+      _activeGroup = group;
+      _activeContact = null;
+      _groupMessages = (group['messages'] as List? ?? []).cast<Map<String, dynamic>>();
+      _aiSuggestions = [];
+    });
+    _scrollToBottom();
+    _fetchGroupAiSuggestions();
+  }
+
+  Future<void> _pollMessages() async {
     if (_activeConversationId == null) return;
-    try {
-      final msgs = await _repo.getMessages(_activeConversationId!);
-      if (!mounted) return;
-      if (msgs.length != _messages.length) {
-        setState(() => _messages = msgs);
-        _scrollToBottom();
-      }
-    } catch (_) {}
+    final msgs = await _repo.getMessages(_activeConversationId!);
+    if (!mounted) return;
+    if (msgs.length != _messages.length) {
+      setState(() => _messages = msgs);
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _pollGroupMessages() async {
+    if (_activeGroup == null) return;
+    final list = await _repo.getMeetingGroups();
+    if (!mounted) return;
+    final match = list.firstWhere(
+      (g) => g['id'] == _activeGroup!['id'],
+      orElse: () => _activeGroup!,
+    );
+    final updatedMsgs = (match['messages'] as List? ?? []).cast<Map<String, dynamic>>();
+    if (updatedMsgs.length != _groupMessages.length) {
+      setState(() {
+        _activeGroup = match;
+        _groupMessages = updatedMsgs;
+      });
+      _scrollToBottom();
+    }
+  }
+
+  void _sendMessage({String? customText}) async {
+    final text = (customText ?? _textController.text).trim();
+    if (text.isEmpty) return;
+    _textController.clear();
+
+    if (_selectedTab == ChatTab.direct && _activeConversationId != null) {
+      setState(() {
+        _messages.add(ChatMessageItem(
+          id: DateTime.now().millisecondsSinceEpoch,
+          conversationId: _activeConversationId!,
+          body: text,
+          isRead: false,
+          createdAt: DateTime.now().toIso8601String(),
+          sender: {'id': ref.read(authProvider).user?.id, 'name': 'You'},
+        ));
+      });
+      _scrollToBottom();
+      await _repo.sendMessage(_activeConversationId!, text);
+      _pollMessages();
+      _fetchAiSuggestions();
+    } else if (_selectedTab == ChatTab.groups && _activeGroup != null) {
+      final interviewId = _activeGroup!['id'] as int;
+      final userName = ref.read(authProvider).user?.fullName ?? 'You';
+
+      setState(() {
+        _groupMessages.add({
+          'sender': userName,
+          'body': text,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      });
+      _scrollToBottom();
+      await _repo.sendMeetingGroupMessage(interviewId, text);
+      _pollGroupMessages();
+      _fetchGroupAiSuggestions();
+    }
   }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent + 60,
+          _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
         );
@@ -124,30 +222,30 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     });
   }
 
-  void _sendMessage({String? customText}) async {
-    final text = (customText ?? _textController.text).trim();
-    if (text.isEmpty || _activeConversationId == null) return;
-
-    _textController.clear();
-    setState(() => _aiSuggestions.clear());
-
-    try {
-      final sent = await _repo.sendMessage(_activeConversationId!, text);
-      if (!mounted) return;
-      setState(() {
-        _messages.add(sent);
-      });
-      _scrollToBottom();
-    } catch (_) {}
+  Future<void> _fetchAiSuggestions() async {
+    final typedDraft = _textController.text.trim();
+    final last = _messages.isNotEmpty ? _messages.last.body : '';
+    setState(() => _isLoadingSuggestions = true);
+    final suggestions = await _repo.getAiSuggestions(
+      last,
+      context: "Recruiting conversation with ${_activeContact?.name ?? 'candidate'}",
+      draft: typedDraft,
+    );
+    if (!mounted) return;
+    setState(() {
+      _aiSuggestions = suggestions;
+      _isLoadingSuggestions = false;
+    });
   }
 
-  void _fetchAiSuggestions() async {
-    if (!mounted) return;
+  Future<void> _fetchGroupAiSuggestions() async {
+    final typedDraft = _textController.text.trim();
+    final last = _groupMessages.isNotEmpty ? _groupMessages.last['body']?.toString() ?? '' : '';
     setState(() => _isLoadingSuggestions = true);
-    final lastText = _messages.isNotEmpty ? _messages.last.body : "Initial interview greeting";
     final suggestions = await _repo.getAiSuggestions(
-      lastText,
-      context: "Recruiting conversation with ${_activeContact?.name ?? 'candidate'}",
+      last,
+      context: "Live technical meeting group: ${_activeGroup?['title'] ?? 'Interview'}",
+      draft: typedDraft,
     );
     if (!mounted) return;
     setState(() {
@@ -161,8 +259,9 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     final user = ref.watch(authProvider).user;
     final isDesktop = ResponsiveLayout.isDesktop(context);
 
-    // If mobile and in active conversation, show chat view with back button
-    final showMobileChat = !isDesktop && _activeContact != null;
+    final hasActiveDirect = _activeContact != null;
+    final hasActiveGroup = _activeGroup != null;
+    final showMobileChat = !isDesktop && (hasActiveDirect || hasActiveGroup);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -182,21 +281,22 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                       padding: EdgeInsets.zero,
                       child: Row(
                         children: [
-                          // Left pane: Contacts list (hide on mobile when chat open)
+                          // Left pane
                           if (isDesktop || !showMobileChat)
                             SizedBox(
-                              width: isDesktop ? 340 : double.infinity,
-                              child: _buildContactsPane(isDesktop),
+                              width: isDesktop ? 350 : double.infinity,
+                              child: _buildContactsAndGroupsPane(isDesktop),
                             ),
 
-                          // Divider for desktop
                           if (isDesktop)
                             const VerticalDivider(color: AppColors.border, width: 1),
 
-                          // Right pane: Active chat (hide on mobile when no contact selected)
+                          // Right pane
                           if (isDesktop || showMobileChat)
                             Expanded(
-                              child: _buildChatPane(isDesktop, showMobileChat),
+                              child: _selectedTab == ChatTab.direct
+                                  ? _buildDirectChatPane(isDesktop, showMobileChat)
+                                  : _buildGroupChatPane(isDesktop, showMobileChat),
                             ),
                         ],
                       ),
@@ -211,158 +311,258 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     );
   }
 
-  Widget _buildContactsPane(bool isDesktop) {
-    final user = ref.watch(authProvider).user;
-    final isRecruiter = user?.isRecruiter ?? false;
-
+  Widget _buildContactsAndGroupsPane(bool isDesktop) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header
+        // Header & Tabs
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.chat_bubble_outline, color: AppColors.primary, size: 18),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Chats & Channels', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: Color(0xFF94A3B8), size: 18),
+                    tooltip: 'Refresh',
+                    onPressed: () {
+                      _fetchContacts();
+                      _fetchMeetingGroups();
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(height: 8),
+
+              // Segmented Tabs: Direct vs Meeting Groups
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161828),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
                   children: [
-                    Text(
-                      isRecruiter ? 'Candidates & Messages' : 'Direct Messages',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          setState(() => _selectedTab = ChatTab.direct);
+                          if (_contacts.isNotEmpty && _activeContact == null) {
+                            _selectContact(_contacts.first);
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: _selectedTab == ChatTab.direct ? AppColors.primary : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.person_outline, size: 15, color: Colors.white),
+                              SizedBox(width: 6),
+                              Text('1-on-1 Direct', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                    Text(
-                      isRecruiter ? 'Connect directly with applicants' : 'Chat with recruiters',
-                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          setState(() => _selectedTab = ChatTab.groups);
+                          if (_meetingGroups.isNotEmpty && _activeGroup == null) {
+                            _selectGroup(_meetingGroups.first);
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: _selectedTab == ChatTab.groups ? AppColors.primary : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.groups_outlined, size: 15, color: Colors.white),
+                              SizedBox(width: 6),
+                              Text('Meeting Groups', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.refresh, color: Color(0xFF94A3B8), size: 18),
-                tooltip: 'Refresh Contacts',
-                onPressed: _fetchContacts,
               ),
             ],
           ),
         ),
         const Divider(color: AppColors.border, height: 1),
 
-        // Contacts List
+        // List Content
         Expanded(
-          child: _isLoadingContacts
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-              : _contacts.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.people_outline, size: 40, color: Colors.white.withOpacity(0.25)),
-                            const SizedBox(height: 12),
-                            Text(
-                              isRecruiter ? 'No candidates found yet' : 'No recruiters found yet',
-                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              isRecruiter
-                                  ? 'Candidates will appear here as they register or apply.'
-                                  : 'Explore jobs and apply to connect with recruiters.',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      itemCount: _contacts.length,
-                      separatorBuilder: (_, __) => const Divider(color: Color(0xFF1E2030), height: 1),
-                      itemBuilder: (ctx, idx) {
-                        final c = _contacts[idx];
-                        final isSelected = _activeContact?.id == c.id;
-
-                        return InkWell(
-                          onTap: () => _selectContact(c),
-                          child: Container(
-                            color: isSelected ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 18,
-                                  backgroundColor: isSelected ? AppColors.primary : const Color(0xFF2E324D),
-                                  child: Text(
-                                    c.name.isNotEmpty ? c.name[0].toUpperCase() : 'U',
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              c.name,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                          ),
-                                          if (c.unreadCount > 0)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFFD946EF),
-                                                borderRadius: BorderRadius.circular(10),
-                                              ),
-                                              child: Text(
-                                                '${c.unreadCount}',
-                                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        c.headline,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+          child: _selectedTab == ChatTab.direct
+              ? _buildDirectList()
+              : _buildGroupList(),
         ),
       ],
     );
   }
 
-  Widget _buildChatPane(bool isDesktop, bool showMobileChat) {
+  Widget _buildDirectList() {
+    if (_isLoadingContacts) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+    if (_contacts.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('No contacts found yet. Apply to jobs or connect with recruiters.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12), textAlign: TextAlign.center),
+        ),
+      );
+    }
+    return ListView.separated(
+      itemCount: _contacts.length,
+      separatorBuilder: (_, __) => const Divider(color: Color(0xFF1E2030), height: 1),
+      itemBuilder: (ctx, idx) {
+        final c = _contacts[idx];
+        final isSelected = _activeContact?.id == c.id;
+
+        return InkWell(
+          onTap: () => _selectContact(c),
+          child: Container(
+            color: isSelected ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: isSelected ? AppColors.primary : const Color(0xFF2E324D),
+                  child: Text(
+                    c.name.isNotEmpty ? c.name[0].toUpperCase() : 'U',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white, fontWeight: isSelected ? FontWeight.bold : FontWeight.w600, fontSize: 13)),
+                      const SizedBox(height: 2),
+                      Text(c.headline, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGroupList() {
+    if (_isLoadingGroups) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+    if (_meetingGroups.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('No live meeting groups yet. Start or join an interview to activate group chats.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12), textAlign: TextAlign.center),
+        ),
+      );
+    }
+    return ListView.separated(
+      itemCount: _meetingGroups.length,
+      separatorBuilder: (_, __) => const Divider(color: Color(0xFF1E2030), height: 1),
+      itemBuilder: (ctx, idx) {
+        final g = _meetingGroups[idx];
+        final isSelected = _activeGroup?['id'] == g['id'];
+        final status = (g['status'] ?? 'SCHEDULED').toString().toUpperCase();
+        final isCompleted = status == 'COMPLETED';
+
+        return InkWell(
+          onTap: () => _selectGroup(g),
+          child: Container(
+            color: isSelected ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: isCompleted ? AppColors.accentCyan.withOpacity(0.15) : AppColors.success.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: isCompleted ? AppColors.accentCyan.withOpacity(0.4) : AppColors.success.withOpacity(0.4)),
+                  ),
+                  child: Icon(
+                    isCompleted ? Icons.check_circle_outline : Icons.videocam_outlined,
+                    color: isCompleted ? AppColors.accentCyan : AppColors.success,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              g['title'] ?? 'Interview Session',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: Colors.white, fontWeight: isSelected ? FontWeight.bold : FontWeight.w600, fontSize: 13),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isCompleted ? AppColors.accentCyan.withOpacity(0.2) : AppColors.success.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              isCompleted ? 'COMPLETED' : 'LIVE',
+                              style: TextStyle(
+                                color: isCompleted ? AppColors.accentCyan : AppColors.success,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${g['role'] ?? "Tech Role"} • ${g['company'] ?? "TalentAI"}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDirectChatPane(bool isDesktop, bool showMobileChat) {
     final myUserId = ref.watch(authProvider).user?.id;
 
     if (_activeContact == null) {
@@ -372,10 +572,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
           children: [
             Icon(Icons.mark_chat_unread_outlined, size: 54, color: Colors.white.withOpacity(0.2)),
             const SizedBox(height: 14),
-            const Text(
-              'Select a contact to start conversation',
-              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14, fontWeight: FontWeight.w600),
-            ),
+            const Text('Select a contact to view conversation', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14)),
           ],
         ),
       );
@@ -383,7 +580,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
 
     return Column(
       children: [
-        // Active Chat Header
+        // Header
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: const BoxDecoration(
@@ -410,23 +607,13 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _activeContact!.name,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    Text(
-                      _activeContact!.headline,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                    ),
+                    Text(_activeContact!.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text(_activeContact!.headline, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
                   ],
                 ),
               ),
               ElevatedButton.icon(
-                onPressed: () {
-                  context.go('/live-interview?room=direct_${_activeContact!.id}');
-                },
+                onPressed: () => context.go('/live-interview?room=direct_${_activeContact!.id}'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFD946EF),
                   foregroundColor: Colors.white,
@@ -440,23 +627,13 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
           ),
         ),
 
-        // Messages list
+        // Messages
         Expanded(
           child: _isLoadingMessages
               ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
               : _messages.isEmpty
                   ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.chat_bubble_outline, size: 40, color: Colors.white.withOpacity(0.2)),
-                          const SizedBox(height: 10),
-                          const Text(
-                            'No messages yet. Send a greeting to start chatting!',
-                            style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                          ),
-                        ],
-                      ),
+                      child: Text('No messages yet. Send a greeting to start chatting!', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
                     )
                   : ListView.builder(
                       controller: _scrollController,
@@ -480,34 +657,16 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                                 bottomLeft: isMe ? const Radius.circular(14) : Radius.zero,
                                 bottomRight: isMe ? Radius.zero : const Radius.circular(14),
                               ),
-                              border: Border.all(
-                                color: isMe ? AppColors.primary.withOpacity(0.5) : const Color(0xFF2E324D),
-                              ),
+                              border: Border.all(color: isMe ? AppColors.primary.withOpacity(0.5) : const Color(0xFF2E324D)),
                             ),
                             child: Column(
                               crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  m.body,
-                                  style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3),
-                                ),
+                                Text(m.body, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3)),
                                 const SizedBox(height: 4),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      m.createdAt.length >= 16 ? m.createdAt.substring(11, 16) : '',
-                                      style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 10),
-                                    ),
-                                    if (isMe) ...[
-                                      const SizedBox(width: 4),
-                                      Icon(
-                                        m.isRead ? Icons.done_all : Icons.done,
-                                        size: 13,
-                                        color: m.isRead ? const Color(0xFF38BDF8) : Colors.white70,
-                                      ),
-                                    ],
-                                  ],
+                                Text(
+                                  m.createdAt.length >= 16 ? m.createdAt.substring(11, 16) : '',
+                                  style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 10),
                                 ),
                               ],
                             ),
@@ -517,7 +676,153 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                     ),
         ),
 
-        // AI Auto-Suggestions Bar (Gemini Powered)
+        _buildSuggestionsAndInput(),
+      ],
+    );
+  }
+
+  Widget _buildGroupChatPane(bool isDesktop, bool showMobileChat) {
+    final currentUserName = ref.watch(authProvider).user?.fullName ?? 'You';
+
+    if (_activeGroup == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.groups_outlined, size: 54, color: Colors.white.withOpacity(0.2)),
+            const SizedBox(height: 14),
+            const Text('Select a meeting group to view live transcript & chat', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14)),
+          ],
+        ),
+      );
+    }
+
+    final roomId = _activeGroup!['room_id'] ?? '';
+    final role = _activeGroup!['role'] ?? 'Technical Role';
+    final company = _activeGroup!['company'] ?? 'TalentAI';
+
+    return Column(
+      children: [
+        // Meeting Group Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: const BoxDecoration(
+            color: Color(0xFF131522),
+            border: Border(bottom: BorderSide(color: AppColors.border, width: 1)),
+          ),
+          child: Row(
+            children: [
+              if (showMobileChat)
+                IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                  onPressed: () => setState(() => _activeGroup = null),
+                ),
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.5)),
+                ),
+                child: const Icon(Icons.forum_outlined, color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_activeGroup!['title'] ?? 'Meeting Group', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('$role • $company', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                  ],
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => context.go('/live-interview?room=$roomId&id=${_activeGroup!['id']}'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.videocam, size: 15),
+                label: Text(isDesktop ? 'Join Live Room' : 'Join', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+
+        // Group Messages
+        Expanded(
+          child: _groupMessages.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.forum_outlined, size: 40, color: Colors.white.withOpacity(0.2)),
+                      const SizedBox(height: 8),
+                      const Text('No live meeting messages recorded yet. Start discussion!', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  itemCount: _groupMessages.length,
+                  itemBuilder: (ctx, idx) {
+                    final m = _groupMessages[idx];
+                    final sender = m['sender']?.toString() ?? 'Participant';
+                    final isMe = sender == 'You' || sender.toLowerCase().contains(currentUserName.toLowerCase());
+                    final body = m['body']?.toString() ?? '';
+                    final createdAt = m['created_at']?.toString() ?? '';
+
+                    return Align(
+                      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * (isDesktop ? 0.55 : 0.78)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: isMe ? AppColors.primary : const Color(0xFF1E2133),
+                          borderRadius: BorderRadius.only(
+                            topLeft: const Radius.circular(14),
+                            topRight: const Radius.circular(14),
+                            bottomLeft: isMe ? const Radius.circular(14) : Radius.zero,
+                            bottomRight: isMe ? Radius.zero : const Radius.circular(14),
+                          ),
+                          border: Border.all(color: isMe ? AppColors.primary.withOpacity(0.5) : const Color(0xFF2E324D)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                          children: [
+                            if (!isMe) ...[
+                              Text(sender, style: const TextStyle(color: AppColors.accentCyan, fontSize: 11, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 2),
+                            ],
+                            Text(body, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3)),
+                            const SizedBox(height: 4),
+                            Text(
+                              createdAt.length >= 16 ? createdAt.substring(11, 16) : '',
+                              style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 10),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+
+        _buildSuggestionsAndInput(),
+      ],
+    );
+  }
+
+  Widget _buildSuggestionsAndInput() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // AI Auto-Suggestions Bar
         if (_aiSuggestions.isNotEmpty || _isLoadingSuggestions) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -529,10 +834,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
               children: [
                 const Icon(Icons.auto_awesome, color: Color(0xFFD946EF), size: 15),
                 const SizedBox(width: 8),
-                const Text(
-                  'AI Smart Replies:',
-                  style: TextStyle(color: Color(0xFFD946EF), fontSize: 11, fontWeight: FontWeight.bold),
-                ),
+                const Text('AI Suggestions:', style: TextStyle(color: Color(0xFFD946EF), fontSize: 11, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: SingleChildScrollView(
@@ -540,11 +842,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                     child: Row(
                       children: _isLoadingSuggestions
                           ? [
-                              const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(color: Color(0xFFD946EF), strokeWidth: 2),
-                              ),
+                              const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Color(0xFFD946EF), strokeWidth: 2)),
                               const SizedBox(width: 8),
                               const Text('Generating Gemini suggestions...', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
                             ]
@@ -554,13 +852,10 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                                 child: ActionChip(
                                   backgroundColor: const Color(0xFF1E2138),
                                   side: BorderSide(color: const Color(0xFFD946EF).withOpacity(0.35)),
-                                  label: Text(
-                                    s,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 11),
-                                  ),
-                                  onPressed: () => _sendMessage(customText: s),
+                                  label: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 11)),
+                                  onPressed: () {
+                                    setState(() => _textController.text = s);
+                                  },
                                 ),
                               );
                             }).toList(),
@@ -583,19 +878,19 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.auto_awesome, color: Color(0xFFD946EF), size: 20),
-                tooltip: 'Get AI Suggestions (Gemini)',
-                onPressed: _fetchAiSuggestions,
+                tooltip: 'Get AI Suggestions',
+                onPressed: _selectedTab == ChatTab.direct ? _fetchAiSuggestions : _fetchGroupAiSuggestions,
               ),
               Expanded(
                 child: TextField(
                   controller: _textController,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
-                  decoration: const InputDecoration(
-                    hintText: 'Type your message...',
-                    hintStyle: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: _selectedTab == ChatTab.direct ? 'Type your message...' : 'Chat with live meeting participants...',
+                    hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
                     border: InputBorder.none,
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),
                   onSubmitted: (_) => _sendMessage(),
                 ),

@@ -141,16 +141,32 @@
         const peer = peers[uid];
         if (!peer) return;
 
+        const audioTracks = stream.getAudioTracks ? stream.getAudioTracks() : [];
+        if (audioTracks.length === 0) return;
+
+        // Dedicated audio-only media stream ensures browser HTMLAudio element doesn't get confused by video tracks
+        const audioStream = new MediaStream(audioTracks);
+
+        audioTracks.forEach(t => {
+          t.onunmute = () => {
+            console.log('WebRTC: Remote audio track unmuted for', uid);
+            if (peer.audioElem) {
+              peer.audioElem.muted = false;
+              peer.audioElem.play().catch(() => {});
+            }
+          };
+        });
+
         // 1. Play through dedicated HTMLAudioElement
         if (peer.audioElem) {
           try {
-            peer.audioElem.srcObject = stream;
+            peer.audioElem.srcObject = audioStream;
             peer.audioElem.muted = false;
             peer.audioElem.volume = 1.0;
             const playPromise = peer.audioElem.play();
             if (playPromise !== undefined) {
               playPromise.catch(e => {
-                console.log('Audio autoplay waiting for user interaction:', e);
+                console.log('Audio autoplay retry queued for user gesture:', e);
               });
             }
           } catch (err) {
@@ -158,20 +174,34 @@
           }
         }
 
-        // 2. Play through Web Audio Context destination (bypasses browser autoplay tag blocks)
+        // 2. Route directly to WebAudio Context destination (unmuted, bypasses element autoplay flags)
         try {
           ensureAudioContext();
-          if (audioCtx) {
+          if (audioCtx && audioCtx.state === 'running') {
             if (peer.audioSourceNode) {
               try { peer.audioSourceNode.disconnect(); } catch (_) {}
             }
-            peer.audioSourceNode = audioCtx.createMediaStreamSource(stream);
+            peer.audioSourceNode = audioCtx.createMediaStreamSource(audioStream);
             peer.audioSourceNode.connect(audioCtx.destination);
           }
         } catch (webaudioErr) {
           console.warn('WebAudio connect error:', webaudioErr);
         }
       }
+
+      // Ensure user interaction unblocks audio playback on all browsers
+      const resumeAllWebRTCAudio = () => {
+        ensureAudioContext();
+        Object.values(peers).forEach(p => {
+          if (p.audioElem && p.audioElem.srcObject) {
+            p.audioElem.muted = false;
+            p.audioElem.play().catch(() => {});
+          }
+        });
+      };
+      window.addEventListener('click', resumeAllWebRTCAudio);
+      window.addEventListener('touchstart', resumeAllWebRTCAudio);
+      window.addEventListener('keydown', resumeAllWebRTCAudio);
 
       async function getMediaStream() {
         if (localStream) return localStream;
@@ -213,7 +243,7 @@
       }
 
       function getOrCreatePeer(remoteUserId) {
-        const uid = String(remoteUserId);
+        let uid = String(remoteUserId || 'default');
         if (peers[uid]) {
           syncLocalTracksToPeer(peers[uid]);
           return peers[uid];
@@ -261,21 +291,21 @@
 
         pc.ontrack = (event) => {
           console.log('WebRTC: Remote track received from', uid, event.track.kind);
-          const activeStream = (event.streams && event.streams[0]) ? event.streams[0] : peerObj.remoteStream;
-          peerObj.remoteStream = activeStream;
-          try {
-            peerObj.remoteStream.addTrack(event.track);
-          } catch (_) {}
+          if (!peerObj.remoteStream.getTracks().some(t => t.id === event.track.id)) {
+            try {
+              peerObj.remoteStream.addTrack(event.track);
+            } catch (_) {}
+          }
 
-          // Handle Audio: Route to both HTMLAudio and WebAudio destination
-          if (event.track.kind === 'audio' || activeStream.getAudioTracks().length > 0) {
-            playRemoteAudio(uid, activeStream);
+          // Handle Audio
+          if (event.track.kind === 'audio' || peerObj.remoteStream.getAudioTracks().length > 0) {
+            playRemoteAudio(uid, peerObj.remoteStream);
           }
 
           // Handle Video: Bind to video element if available
-          if (event.track.kind === 'video' || activeStream.getVideoTracks().length > 0) {
+          if (event.track.kind === 'video' || peerObj.remoteStream.getVideoTracks().length > 0) {
             if (peerObj.videoElem) {
-              peerObj.videoElem.srcObject = activeStream;
+              peerObj.videoElem.srcObject = peerObj.remoteStream;
               peerObj.videoElem.play().catch(() => {});
             }
           }
@@ -290,6 +320,10 @@
           if (pc.connectionState === 'connected') {
             if (peerObj.remoteStream && peerObj.remoteStream.getAudioTracks().length > 0) {
               playRemoteAudio(uid, peerObj.remoteStream);
+            }
+            if (peerObj.videoElem && peerObj.remoteStream && peerObj.remoteStream.getVideoTracks().length > 0) {
+              peerObj.videoElem.srcObject = peerObj.remoteStream;
+              peerObj.videoElem.play().catch(() => {});
             }
           } else if (pc.connectionState === 'failed') {
             try {
@@ -328,15 +362,31 @@
         },
 
         attachRemoteVideoForUser: function(remoteUserId, videoElem) {
-          const uid = String(remoteUserId);
+          let uid = String(remoteUserId || '');
           if (videoElem) {
             videoElem.setAttribute('playsinline', 'true');
             videoElem.setAttribute('webkit-playsinline', 'true');
-            const peer = getOrCreatePeer(uid);
-            peer.videoElem = videoElem;
-            if (peer.remoteStream && peer.remoteStream.getTracks().length > 0) {
-              videoElem.srcObject = peer.remoteStream;
-              videoElem.play().catch(() => {});
+            videoElem.muted = true;
+            videoElem.autoplay = true;
+
+            // Match exact uid, or if only 1 remote peer exists, match that peer
+            let peer = peers[uid];
+            if (!peer) {
+              const allKeys = Object.keys(peers);
+              const foundKey = allKeys.find(k => peers[k].remoteStream && peers[k].remoteStream.getVideoTracks().length > 0) || allKeys[0];
+              if (foundKey) {
+                uid = foundKey;
+                peer = peers[uid];
+              } else {
+                peer = getOrCreatePeer(uid);
+              }
+            }
+            if (peer) {
+              peer.videoElem = videoElem;
+              if (peer.remoteStream && peer.remoteStream.getVideoTracks().length > 0) {
+                videoElem.srcObject = peer.remoteStream;
+                videoElem.play().catch(() => {});
+              }
             }
           }
         },
@@ -354,6 +404,9 @@
             }
             const peer = getOrCreatePeer(uid);
             syncLocalTracksToPeer(peer);
+            if (peer.pc.signalingState !== 'stable' && !iceRestart) {
+              return;
+            }
             const offer = await peer.pc.createOffer({
               offerToReceiveAudio: true,
               offerToReceiveVideo: true,
@@ -493,9 +546,41 @@
           }
         },
 
-        toggleMic: function(enabled) {
+        toggleMic: async function(enabled) {
+          if (!localStream && enabled) {
+            localStream = await getMediaStream();
+          }
           if (localStream) {
-            localStream.getAudioTracks().forEach(t => t.enabled = enabled);
+            let audioTracks = localStream.getAudioTracks();
+            if (enabled && audioTracks.length === 0) {
+              try {
+                const newAudio = await navigator.mediaDevices.getUserMedia({
+                  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
+                const newTrack = newAudio.getAudioTracks()[0];
+                if (newTrack) {
+                  localStream.addTrack(newTrack);
+                  audioTracks = [newTrack];
+                  Object.values(peers).forEach(p => {
+                    if (p.pc) {
+                      const senders = p.pc.getSenders();
+                      const existing = senders.find(s => s.track && s.track.kind === 'audio');
+                      if (existing) {
+                        existing.replaceTrack(newTrack);
+                      } else {
+                        p.pc.addTrack(newTrack, localStream);
+                      }
+                    }
+                  });
+                }
+              } catch (micErr) {
+                console.warn('Could not acquire mic track on unmute:', micErr);
+              }
+            }
+            audioTracks.forEach(t => {
+              t.enabled = Boolean(enabled);
+            });
+            console.log('WebRTC: Local mic toggled ->', Boolean(enabled), 'tracks:', audioTracks.length);
           }
         },
 
@@ -657,6 +742,42 @@
             try { recognition.stop(); } catch (_) {}
             recognition = null;
           }
+        },
+
+        speak: function(text, onStart, onEnd) {
+          if (!('speechSynthesis' in window)) return false;
+          try {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.95;
+            utterance.pitch = 1.05;
+            utterance.lang = 'en-US';
+
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Victoria')) && v.lang.startsWith('en')) || voices.find(v => v.lang.startsWith('en'));
+            if (preferred) utterance.voice = preferred;
+
+            if (onStart) utterance.onstart = onStart;
+            if (onEnd) {
+              utterance.onend = onEnd;
+              utterance.onerror = onEnd;
+            }
+            window.speechSynthesis.speak(utterance);
+            return true;
+          } catch (e) {
+            console.warn('Speech synthesis error:', e);
+            return false;
+          }
+        },
+
+        stopSpeaking: function() {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+          }
+        },
+
+        isSpeaking: function() {
+          return Boolean('speechSynthesis' in window && window.speechSynthesis.speaking);
         }
       };
     })();

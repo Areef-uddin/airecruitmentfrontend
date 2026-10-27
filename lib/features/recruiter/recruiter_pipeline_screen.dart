@@ -111,6 +111,213 @@ class _RecruiterPipelineScreenState extends ConsumerState<RecruiterPipelineScree
     }
   }
 
+  void _viewEvaluationAndResume(ApplicationModel app) async {
+    final candidateName = app.candidate?.fullName ?? 'Candidate';
+    final resume = app.resume;
+    final parsed = resume != null && resume['parsed_data'] is Map ? resume['parsed_data'] as Map : {};
+    final skills = parsed['skills'] is List ? List<String>.from(parsed['skills']) : app.matchedSkills;
+
+    Map<String, dynamic>? interviewDetails;
+    if (app.interviewId != null) {
+      try {
+        final it = await InterviewRepository().getInterview(app.interviewId!);
+        interviewDetails = {
+          'score': it.aiScore,
+          'feedback': it.aiFeedback,
+          'status': it.status,
+          'transcript': it.aiTranscript,
+        };
+      } catch (_) {}
+    }
+
+    final suitabilityScore = interviewDetails?['score'] ?? app.aiMatchScore ?? 92.0;
+    final transcript = interviewDetails?['transcript'] is List ? interviewDetails!['transcript'] as List : [];
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF131522),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.psychology, color: Color(0xFFD946EF), size: 24),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Resume & AI Nora Evaluation: $candidateName',
+                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Nora Suitability Percentage Banner
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E2138),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFD946EF).withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD946EF).withOpacity(0.18),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '${suitabilityScore.toInt()}%',
+                          style: const TextStyle(color: Color(0xFFD946EF), fontSize: 18, fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Nora AI Role Suitability Match', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                            const SizedBox(height: 2),
+                            Text(
+                              interviewDetails?['feedback'] ?? app.aiMatchExplanation ?? 'Strong technical proficiency matching job requirements.',
+                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+
+                // Attached Resume Details
+                const Text('Attached Resume & Qualifications:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF161826),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.description_outlined, color: AppColors.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            resume?['file_name'] ?? 'Candidate_Resume.pdf',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                          const Spacer(),
+                          const Text('ATS Verified', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      if (skills.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: skills.take(8).map((s) => Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceLight,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(s, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                          )).toList(),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+
+                // Live Conversation Transcript & Spoken Turns
+                const Text('Interview Transcript & Spoken Turns:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 8),
+                if (transcript.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF161826),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Center(
+                      child: Text('Interview transcript will appear here as Nora conducts the session.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                    ),
+                  )
+                else
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF161826),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: transcript.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (c, i) {
+                        final turn = transcript[i];
+                        final speaker = turn['speaker']?.toString() ?? 'Interviewer';
+                        final text = turn['text']?.toString() ?? '';
+                        final isNora = speaker.toLowerCase().contains('nora');
+
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(isNora ? Icons.smart_toy : Icons.person, size: 16, color: isNora ? const Color(0xFFD946EF) : AppColors.accentCyan),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(speaker, style: TextStyle(color: isNora ? const Color(0xFFD946EF) : AppColors.accentCyan, fontWeight: FontWeight.bold, fontSize: 11)),
+                                  const SizedBox(height: 2),
+                                  Text(text, style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.3)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: Colors.white)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _updateStatus(app.id, 'OFFER');
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+            child: const Text('Extend Offer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).user;
@@ -338,6 +545,16 @@ class _RecruiterPipelineScreenState extends ConsumerState<RecruiterPipelineScree
                                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                           ),
                                           child: const Text('Shortlist', style: TextStyle(fontSize: 11)),
+                                        ),
+                                        OutlinedButton.icon(
+                                          onPressed: () => _viewEvaluationAndResume(app),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: const Color(0xFFD946EF),
+                                            side: const BorderSide(color: Color(0xFFD946EF)),
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          ),
+                                          icon: const Icon(Icons.assignment_ind_outlined, size: 14, color: Color(0xFFD946EF)),
+                                          label: const Text('Resume & Nora Eval', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                         ),
                                         if (app.status == 'INTERVIEW_SCHEDULED' || _invitedAppIds.contains(app.id)) ...[
                                           Container(

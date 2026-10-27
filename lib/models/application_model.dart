@@ -14,6 +14,8 @@ class ApplicationModel {
   final String appliedAt;
   final String? interviewLink;
   final int? interviewId;
+  final Map<String, dynamic>? resume;
+  int? get jobId => job?.id;
 
   ApplicationModel({
     required this.id,
@@ -28,6 +30,7 @@ class ApplicationModel {
     this.appliedAt = '',
     this.interviewLink,
     this.interviewId,
+    this.resume,
   });
 
   factory ApplicationModel.fromJson(Map<String, dynamic> json) {
@@ -51,6 +54,7 @@ class ApplicationModel {
       appliedAt: json['applied_at'] ?? '',
       interviewLink: json['interview_link'],
       interviewId: json['interview_id'],
+      resume: json['resume'] is Map ? (json['resume'] as Map).cast<String, dynamic>() : null,
     );
   }
 }

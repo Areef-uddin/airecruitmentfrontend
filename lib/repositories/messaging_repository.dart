@@ -109,23 +109,52 @@ class MessagingRepository {
     return ChatMessageItem.fromJson(response.data);
   }
 
-  Future<List<String>> getAiSuggestions(String lastMessage, {String? context}) async {
+  Future<List<String>> getAiSuggestions(String lastMessage, {String? context, String? draft}) async {
     try {
       final response = await _dio.post(
         ApiConfig.chatAiSuggestions,
         data: {
           'last_message': lastMessage,
           if (context != null) 'context': context,
+          if (draft != null && draft.isNotEmpty) 'draft': draft,
         },
       );
       final List list = response.data['suggestions'] ?? [];
       return list.map((s) => s.toString()).toList();
     } catch (_) {
+      if (draft != null && draft.isNotEmpty) {
+        return [
+          draft,
+          'I wanted to touch base regarding: $draft',
+        ];
+      }
       return [
         "Hello! Thank you for getting in touch.",
         "Could we schedule a quick call this week?",
         "Looking forward to hearing from you!",
       ];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getMeetingGroups() async {
+    try {
+      final response = await _dio.get(ApiConfig.chatMeetingGroups);
+      final List list = response.data['groups'] ?? [];
+      return list.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> sendMeetingGroupMessage(int interviewId, String body) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.chatMeetingGroups,
+        data: {'interview_id': interviewId, 'body': body},
+      );
+      return response.data;
+    } catch (_) {
+      return null;
     }
   }
 }

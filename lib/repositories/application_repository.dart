@@ -24,13 +24,32 @@ class ApplicationRepository {
     return ApplicationModel.fromJson(response.data);
   }
 
-  Future<ApplicationModel> applyToJob(int jobId, {String coverLetter = '', int? resumeId}) async {
-    final response = await _dio.post(
-      ApiConfig.applyJob(jobId),
-      data: {
+  Future<ApplicationModel> applyToJob(
+    int jobId, {
+    String coverLetter = '',
+    int? resumeId,
+    List<int>? resumeBytes,
+    String? resumeFileName,
+  }) async {
+    dynamic payload;
+    if (resumeBytes != null && resumeFileName != null) {
+      final formData = FormData();
+      formData.files.add(MapEntry(
+        'resume',
+        MultipartFile.fromBytes(resumeBytes, filename: resumeFileName),
+      ));
+      formData.fields.add(MapEntry('cover_letter', coverLetter));
+      payload = formData;
+    } else {
+      payload = {
         'cover_letter': coverLetter,
         if (resumeId != null) 'resume_id': resumeId,
-      },
+      };
+    }
+
+    final response = await _dio.post(
+      ApiConfig.applyJob(jobId),
+      data: payload,
     );
     return ApplicationModel.fromJson(response.data);
   }

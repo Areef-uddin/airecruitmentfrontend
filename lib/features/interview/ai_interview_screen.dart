@@ -11,6 +11,8 @@ import '../../shared/widgets/top_navbar.dart';
 import '../../shared/widgets/score_gauge.dart';
 import '../../providers/auth_provider.dart';
 import '../../repositories/interview_repository.dart';
+import '../../core/network/api_client.dart';
+import '../../core/config/api_config.dart';
 import 'webrtc/webrtc_service.dart';
 
 class AIInterviewScreen extends ConsumerStatefulWidget {
@@ -71,20 +73,13 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
 
   // Grammar & Writing Suggestions
   List<String> _suggestedPhrases = [];
-  bool _isCheckingGrammar = false;
   Timer? _typingDebounce;
 
   // Host AI Interviewer Mode (AI Takeover)
   bool _isAIModeActive = false;
   int _currentAIQuestionIdx = 0;
   String _activeQuestionText = '';
-  final List<String> _aiQuestions = [
-    'Can you introduce yourself and walk us through an end-to-end technical project you designed and delivered?',
-    'How do you handle scalability, database indexing, and asynchronous job queues under heavy traffic?',
-    'What is your approach to state management, clean architecture, and reactive UI patterns?',
-    'Describe a complex production incident or memory leak you diagnosed and resolved.',
-    'How do you write reliable unit, integration, and end-to-end tests across microservices?',
-  ];
+  List<String> _aiQuestions = [];
 
   // Recording feature
   bool _isRecording = false;
@@ -286,6 +281,13 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           _participants = status.participants;
           if (status.interview != null) {
             _interviewData = status.interview;
+            if (status.interview!['status'] == 'COMPLETED' && !_meetingConcluded) {
+              final user = ref.read(authProvider).user;
+              final isHost = user?.isRecruiter == true || user?.role == 'RECRUITER' || user?.role == 'SUPER_ADMIN';
+              if (!isHost) {
+                _handleMeetingEndedByHost();
+              }
+            }
             final history = status.interview!['chat_history'] as List? ?? [];
             if (_chatMessages.isEmpty && history.isNotEmpty) {
               for (final item in history) {
@@ -365,7 +367,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
 
         if (sigType == 'webrtc') {
           _webrtcService.handleSignal(
-            payload is String ? payload : jsonEncode(payload),
+            payload is Map ? jsonEncode(payload) : payload.toString(),
             fromUser: fromUser,
           );
         } else if (sigType == 'media_state') {
@@ -687,7 +689,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     }
   }
 
-  void _toggleAIMode() {
+  void _toggleAIMode() async {
     final user = ref.read(authProvider).user;
     final myUserId = (user?.id ?? 999).toString();
 
@@ -695,32 +697,100 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       _isAIModeActive = !_isAIModeActive;
     });
 
-    _interviewRepo.sendSignal(
-      room: _roomId,
-      fromUser: myUserId,
-      type: 'ai_mode',
-      payload: {
-        'active': _isAIModeActive,
-        'question': _currentAIQuestion,
-      },
-    );
+    if (_isAIModeActive) {
+      final role = _interviewData?['job_title']?.toString() ?? 'Software Engineering';
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFFD946EF),
-        content: Text(_isAIModeActive
-            ? '🤖 Handed over to AI Nora! Nora is now asking interview questions.'
-            : '👤 Resumed manual recruiter interview control.'),
-      ),
-    );
+      // Load personalized Gemini questions based on candidate resume and job description
+      try {
+        final dio = ApiClient().dio;
+        final res = await dio.post(
+          ApiConfig.aiGenerateQuestions,
+          data: {
+            'interview_id': _interviewId,
+            'title': role,
+            'job_description': _interviewData?['job_description'] ?? '',
+          },
+        );
+        final list = res.data['questions'] as List? ?? [];
+        if (list.isNotEmpty) {
+          final dyn = list
+              .map((q) => q is Map ? (q['question']?.toString() ?? '') : q.toString())
+              .where((q) => q.isNotEmpty)
+              .toList();
+          if (dyn.isNotEmpty) {
+            _aiQuestions = dyn;
+            _currentAIQuestionIdx = 0;
+            _activeQuestionText = _aiQuestions[0];
+          }
+        }
+      } catch (_) {}
+
+      _interviewRepo.sendSignal(
+        room: _roomId,
+        fromUser: myUserId,
+        type: 'ai_mode',
+        payload: {
+          'active': true,
+          'question': _currentAIQuestion,
+        },
+      );
+
+      _webrtcService.speak(
+        "Hello! I am Nora, your autonomous AI lead interviewer. Based on your submitted resume and the requirements for this $role role, let's begin our technical interview: $_currentAIQuestion"
+      );
+
+      _sendMessage(customText: '[AI Interviewer Nora]: $_currentAIQuestion');
+    } else {
+      _webrtcService.stopSpeaking();
+      _interviewRepo.sendSignal(
+        room: _roomId,
+        fromUser: myUserId,
+        type: 'ai_mode',
+        payload: {'active': false},
+      );
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFFD946EF),
+          content: Text(_isAIModeActive
+              ? '🤖 Handed over to AI Nora! Nora is asking tailored questions from candidate resume.'
+              : '👤 Resumed manual recruiter interview control.'),
+        ),
+      );
+    }
   }
 
-  void _nextAIQuestion() {
+  void _nextAIQuestion() async {
     final user = ref.read(authProvider).user;
     final myUserId = (user?.id ?? 999).toString();
 
+    final prevQuestion = _currentAIQuestion;
+    final candidateAnswer = _chatMessages.isNotEmpty ? _chatMessages.last['text']?.toString() ?? '' : '';
+
+    String spokenFeedback = "Great response.";
+    if (candidateAnswer.isNotEmpty) {
+      try {
+        final dio = ApiClient().dio;
+        final res = await dio.post(
+          '/ai/evaluate-answer/',
+          data: {
+            'interview_id': _interviewId,
+            'question': prevQuestion,
+            'answer': candidateAnswer,
+            'job_title': _interviewData?['job_title'] ?? 'Software Engineer',
+          },
+        );
+        if (res.data != null && res.data['reaction'] != null) {
+          spokenFeedback = res.data['reaction'];
+        }
+      } catch (_) {}
+    }
+
     setState(() {
       _currentAIQuestionIdx = (_currentAIQuestionIdx + 1) % _aiQuestions.length;
+      _activeQuestionText = _aiQuestions[_currentAIQuestionIdx];
     });
 
     _interviewRepo.sendSignal(
@@ -733,7 +803,10 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       },
     );
 
-    // Also inject question into in-room chat
+    // Nora speaks reaction + next question naturally
+    _webrtcService.speak("$spokenFeedback Now, let's explore our next question: $_currentAIQuestion");
+
+    // Also post into in-room chat transcript
     _sendMessage(customText: '[AI Interviewer Nora]: $_currentAIQuestion');
   }
 
@@ -982,14 +1055,21 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     );
   }
 
-  void _endMeetingForAll() {
-    // Broadcast meeting ended signal to room
+  void _endMeetingForAll() async {
+    // 1. Run final Nora AI evaluation to calculate suitability percentage
+    _triggerAIEvaluation();
+
+    // 2. Broadcast meeting ended signal to all participants in room
     _interviewRepo.sendSignal(
       room: _roomId,
       fromUser: _myParticipantId,
       type: 'meeting_ended',
       payload: {'reason': 'Session ended by host recruiter'},
     );
+
+    if (_interviewId != null) {
+      await _interviewRepo.updateInterviewStatus(_interviewId!, 'COMPLETED');
+    }
 
     _handleMeetingEndedByHost();
   }
@@ -1958,6 +2038,166 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     );
   }
 
+  Widget _buildAINoraTile({required bool isDesktop}) {
+    final role = _interviewData?['job_title']?.toString() ?? 'Lead Engineering';
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFD946EF),
+          width: 2.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFD946EF).withOpacity(0.35),
+            blurRadius: 18,
+            spreadRadius: 1,
+          ),
+        ],
+        gradient: const RadialGradient(
+          center: Alignment(0.0, -0.2),
+          radius: 1.2,
+          colors: [
+            Color(0xFF231438),
+            Color(0xFF0F101A),
+          ],
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: Stack(
+          children: [
+            // Center Nora Animated Visualizer & Details
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        width: 92,
+                        height: 92,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: const Color(0xFFD946EF).withOpacity(0.6), width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFD946EF).withOpacity(0.4),
+                              blurRadius: 20,
+                              spreadRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const CircleAvatar(
+                        radius: 38,
+                        backgroundColor: Color(0xFF2E194D),
+                        child: Icon(Icons.smart_toy, size: 40, color: Color(0xFFD946EF)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'AI Nora (Autonomous Lead Interviewer)',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD946EF).withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFD946EF).withOpacity(0.4)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildSpeakingAudioWave(true),
+                        const SizedBox(width: 6),
+                        Text('Evaluating for: $role', style: const TextStyle(color: Color(0xFFF0ABFC), fontSize: 11, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Top AI Status Chip
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.75),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFD946EF).withOpacity(0.4)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.auto_awesome, size: 13, color: Color(0xFFD946EF)),
+                    SizedBox(width: 6),
+                    Text('Active AI Evaluator', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ),
+
+            // Bottom Question Overlay
+            Positioned(
+              bottom: 12,
+              left: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF13141F).withOpacity(0.92),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF3B2856)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.record_voice_over, size: 13, color: Color(0xFFD946EF)),
+                        const SizedBox(width: 6),
+                        const Text('CURRENT QUESTION:', style: TextStyle(color: Color(0xFFD946EF), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                        const Spacer(),
+                        InkWell(
+                          onTap: () {
+                            _webrtcService.speak(_currentAIQuestion);
+                          },
+                          child: const Row(
+                            children: [
+                              Icon(Icons.volume_up, size: 12, color: Color(0xFF94A3B8)),
+                              SizedBox(width: 3),
+                              Text('Replay Voice', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 10)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _currentAIQuestion,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildVideoGrid({
     required bool isDesktop,
     required bool isHost,
@@ -1968,6 +2208,23 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     required List<dynamic> otherParticipants,
   }) {
     if (otherParticipants.isEmpty) {
+      if (_isAIModeActive) {
+        return isDesktop
+            ? Row(
+                children: [
+                  Expanded(child: _buildLocalTile(myName, myRole)),
+                  const SizedBox(width: 14),
+                  Expanded(child: _buildAINoraTile(isDesktop: isDesktop)),
+                ],
+              )
+            : Column(
+                children: [
+                  Expanded(flex: 1, child: _buildAINoraTile(isDesktop: isDesktop)),
+                  const SizedBox(height: 10),
+                  Expanded(flex: 1, child: _buildLocalTile(myName, myRole)),
+                ],
+              );
+      }
       return isDesktop
           ? Row(
               children: [
@@ -1985,8 +2242,8 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
             );
     }
 
-    // 1-on-1 Interview (1 Remote + 1 Local)
-    if (otherParticipants.length == 1) {
+    // 1-on-1 Interview (1 Remote + 1 Local) WITHOUT AI Mode
+    if (otherParticipants.length == 1 && !_isAIModeActive) {
       final remote = otherParticipants.first;
       final remoteId = remote['user_id']?.toString() ?? 'remote_1';
       final remoteName = remote['name']?.toString() ?? defaultRemoteName;
@@ -2118,6 +2375,10 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     final allTiles = <Widget>[
       _buildLocalTile(myName, myRole),
     ];
+
+    if (_isAIModeActive) {
+      allTiles.add(_buildAINoraTile(isDesktop: isDesktop));
+    }
 
     for (final p in otherParticipants) {
       final pid = p['user_id']?.toString() ?? 'peer';
@@ -2475,19 +2736,6 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
         ),
       ),
     );
-  }
-
-  Widget _buildRemoteTile(dynamic user, String remoteName, String remoteRole, bool hasRemoteJoined, {required bool isHost}) {
-    if (hasRemoteJoined) {
-      return _buildRemoteParticipantTile(
-        userId: 'remote_default',
-        name: remoteName,
-        role: remoteRole,
-        isVideoOn: true,
-        isMicOn: true,
-      );
-    }
-    return _buildWaitingTile(isHost: isHost, remoteName: remoteName);
   }
 
   Widget _buildControlButton({

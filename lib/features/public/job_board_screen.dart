@@ -8,6 +8,8 @@ import '../../shared/widgets/top_navbar.dart';
 import '../../shared/widgets/app_card.dart';
 import '../../shared/widgets/app_text_field.dart';
 import '../../providers/job_provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../repositories/application_repository.dart';
 
 class JobBoardScreen extends ConsumerStatefulWidget {
   const JobBoardScreen({super.key});
@@ -19,6 +21,27 @@ class JobBoardScreen extends ConsumerStatefulWidget {
 class _JobBoardScreenState extends ConsumerState<JobBoardScreen> {
   final _searchController = TextEditingController();
   String _selectedWorkplace = 'ALL';
+  Set<int> _appliedJobIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAppliedJobs();
+  }
+
+  void _fetchAppliedJobs() async {
+    final user = ref.read(authProvider).user;
+    if (user != null && user.isCandidate) {
+      try {
+        final apps = await ApplicationRepository().getApplications();
+        if (mounted) {
+          setState(() {
+            _appliedJobIds = apps.map((a) => a.jobId).whereType<int>().toSet();
+          });
+        }
+      } catch (_) {}
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -119,6 +142,7 @@ class _JobBoardScreenState extends ConsumerState<JobBoardScreen> {
                             separatorBuilder: (_, __) => const SizedBox(height: 16),
                             itemBuilder: (context, index) {
                               final job = filtered[index];
+                              final hasApplied = _appliedJobIds.contains(job.id);
 
                               return AppCard(
                                 onTap: () => context.go('/jobs/${job.id}'),
@@ -150,6 +174,28 @@ class _JobBoardScreenState extends ConsumerState<JobBoardScreen> {
                                                   style: AppTypography.titleLarge.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
                                                 ),
                                               ),
+                                              if (hasApplied) ...[
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                  decoration: BoxDecoration(
+                                                    color: AppColors.success.withOpacity(0.2),
+                                                    borderRadius: BorderRadius.circular(100),
+                                                    border: Border.all(color: AppColors.success.withOpacity(0.5)),
+                                                  ),
+                                                  child: const Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Icon(Icons.check_circle, color: AppColors.success, size: 12),
+                                                      SizedBox(width: 4),
+                                                      Text(
+                                                        'Applied',
+                                                        style: TextStyle(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.bold),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                              ],
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                                 decoration: BoxDecoration(
@@ -165,7 +211,7 @@ class _JobBoardScreenState extends ConsumerState<JobBoardScreen> {
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
-                                            '${job.company?.name ?? "Technology Corp"} • ${job.location} • \$${(job.minSalary ?? 160000).toInt()} - \$${(job.maxSalary ?? 210000).toInt()}',
+                                            '${job.company?.name ?? "Technology Corp"} • ${job.location} • \$${(job.minSalary ?? 160000).toInt()} - \$${(job.maxSalary ?? 210000).toInt()} • 📅 ${job.createdAt != null ? "${job.createdAt!.day.toString().padLeft(2, '0')}/${job.createdAt!.month.toString().padLeft(2, '0')}/${job.createdAt!.year}" : "Recently"}',
                                             style: AppTypography.bodySmall,
                                           ),
                                           const SizedBox(height: 10),

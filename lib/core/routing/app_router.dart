@@ -11,6 +11,7 @@ import '../../features/candidate/candidate_dashboard_screen.dart';
 import '../../features/candidate/candidate_profile_screen.dart';
 import '../../features/candidate/candidate_resumes_screen.dart';
 import '../../features/candidate/candidate_applications_screen.dart';
+import '../../features/candidate/interview_prep_screen.dart';
 import '../../features/recruiter/recruiter_dashboard_screen.dart';
 import '../../features/recruiter/recruiter_create_job_screen.dart';
 import '../../features/recruiter/recruiter_jobs_screen.dart';
@@ -100,6 +101,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/candidate/applications',
       builder: (context, state) => const CandidateApplicationsScreen(),
+    ),
+    GoRoute(
+      path: '/candidate/prep',
+      builder: (context, state) => const InterviewPrepScreen(),
     ),
     // Recruiter routes
     GoRoute(

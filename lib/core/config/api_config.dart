@@ -67,6 +67,7 @@ class ApiConfig {
   static String conversationMessages(int id) => '/messaging/conversations/$id/messages/';
   static const String chatContacts = '/messaging/contacts/';
   static const String chatAiSuggestions = '/messaging/ai-suggestions/';
+  static const String chatMeetingGroups = '/messaging/groups/';
 
   // AI Services
   static const String aiResumeParse = '/ai/resume-parse/';

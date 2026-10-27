@@ -49,6 +49,7 @@ class JobModel {
   final List<String> skills;
   final double? matchPercentage;
   final String? aiRationale;
+  final DateTime? createdAt;
 
   JobModel({
     required this.id,
@@ -72,6 +73,7 @@ class JobModel {
     this.skills = const [],
     this.matchPercentage,
     this.aiRationale,
+    this.createdAt,
   });
 
   factory JobModel.fromJson(Map<String, dynamic> json) {
@@ -132,6 +134,7 @@ class JobModel {
       skills: parsedSkills,
       matchPercentage: toDouble(json['match_percentage']),
       aiRationale: json['ai_rationale'],
+      createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) : null,
     );
   }
 }

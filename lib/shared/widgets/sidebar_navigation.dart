@@ -16,6 +16,7 @@ List<SidebarItem> getSidebarItems(UserModel? user) {
   if (user?.isCandidate ?? false) {
     return const [
       SidebarItem(title: 'Overview', icon: Icons.dashboard_outlined, route: '/candidate/dashboard'),
+      SidebarItem(title: 'Interview Preparation', icon: Icons.psychology_outlined, route: '/candidate/prep'),
       SidebarItem(title: 'Direct Chat & Messages', icon: Icons.chat_bubble_outline, route: '/messages'),
       SidebarItem(title: 'Live AI Interview', icon: Icons.videocam_outlined, route: '/live-interview'),
       SidebarItem(title: 'My Applications', icon: Icons.assignment_outlined, route: '/candidate/applications'),
