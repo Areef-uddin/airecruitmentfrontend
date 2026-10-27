@@ -49,6 +49,7 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
   bool _isNoraSpeaking = false;
   bool _isListening = false;
   Timer? _speechSilenceTimer;
+  Timer? _noraSpeechFallbackTimer;
   String _candidateSpokenText = '';
   final TextEditingController _candidateAnswerController = TextEditingController();
   double _mockScore = 0;
@@ -244,11 +245,14 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     _webrtcService = createWebRTCService();
-    _fetchCandidateResume();
+    _fetchCandidateResumeAndInitQuizzes();
   }
 
-  void _fetchCandidateResume() async {
+  void _fetchCandidateResumeAndInitQuizzes() async {
     try {
       final dio = ApiClient().dio;
       final res = await dio.get(ApiConfig.resumes);
@@ -258,6 +262,9 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
         _candidateResumeSummary = r['extracted_text'] ?? (r['parsed_data'] != null ? r['parsed_data'].toString() : '');
       }
     } catch (_) {}
+    if (mounted) {
+      _generateGeminiQuizzes();
+    }
   }
 
   @override
@@ -265,6 +272,7 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
     _tabController.dispose();
     _quizTimer?.cancel();
     _speechSilenceTimer?.cancel();
+    _noraSpeechFallbackTimer?.cancel();
     _customRoleController.dispose();
     _customSeniorityController.dispose();
     _candidateAnswerController.dispose();
@@ -475,26 +483,41 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
 
   void _noraSpeak(String text, {VoidCallback? onEnd}) {
     _speechSilenceTimer?.cancel();
+    _noraSpeechFallbackTimer?.cancel();
     _webrtcService.stopSpeechRecognition();
     setState(() {
       _isNoraSpeaking = true;
       _isListening = false;
     });
+
+    void triggerDone() {
+      _noraSpeechFallbackTimer?.cancel();
+      if (!mounted) return;
+      setState(() => _isNoraSpeaking = false);
+      if (onEnd != null) {
+        onEnd();
+      } else {
+        // Siri / Hey Google Mode: Automatically listen to candidate hands-free!
+        _startHandsFreeListening();
+      }
+    }
+
+    // Safety fallback timer so speech state never hangs if browser synthesizes slowly or pauses
+    final words = text.split(' ').length;
+    final maxSec = (words / 2.0).ceil() + 4;
+    _noraSpeechFallbackTimer = Timer(Duration(seconds: maxSec), () {
+      if (mounted && _isNoraSpeaking) {
+        triggerDone();
+      }
+    });
+
     _webrtcService.speak(
       text,
       onStart: () {
         if (mounted) setState(() => _isNoraSpeaking = true);
       },
       onEnd: () {
-        if (mounted) {
-          setState(() => _isNoraSpeaking = false);
-          if (onEnd != null) {
-            onEnd();
-          } else {
-            // Siri / Hey Google Mode: Automatically listen to candidate!
-            _startHandsFreeListening();
-          }
-        }
+        triggerDone();
       },
     );
   }
@@ -731,9 +754,11 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
                                     ],
                                   ),
                                   const SizedBox(height: 6),
-                                  const Text(
-                                    'Type any technical role and experience level. Google Gemini analyzes your submitted resume and generates dynamic technical MCQs or voice mock questions.',
-                                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                  Text(
+                                    _tabController.index == 0
+                                        ? 'Type any technical role and experience level. Google Gemini analyzes your submitted resume and dynamically generates custom technical MCQs.'
+                                        : 'Type your target technical role and seniority. AI Nora conducts a live, hands-free conversational voice interview customized to your profile.',
+                                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                                   ),
                                   const SizedBox(height: 16),
 
@@ -776,20 +801,22 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
                                             ),
                                           ),
                                         ),
-                                        const SizedBox(width: 14),
-                                        ElevatedButton.icon(
-                                          onPressed: _isGeneratingQuizzes ? null : _generateGeminiQuizzes,
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFFD946EF),
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        if (_tabController.index == 0) ...[
+                                          const SizedBox(width: 14),
+                                          ElevatedButton.icon(
+                                            onPressed: _isGeneratingQuizzes ? null : _generateGeminiQuizzes,
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFFD946EF),
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                            ),
+                                            icon: _isGeneratingQuizzes
+                                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                                : const Icon(Icons.auto_awesome, size: 16),
+                                            label: Text(_isGeneratingQuizzes ? 'Generating...' : '✨ Generate with Gemini', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                           ),
-                                          icon: _isGeneratingQuizzes
-                                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                              : const Icon(Icons.auto_awesome, size: 16),
-                                          label: Text(_isGeneratingQuizzes ? 'Generating...' : '✨ Generate with Gemini', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                        ),
+                                        ],
                                       ],
                                     )
                                   else
@@ -822,23 +849,25 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
                                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                                           ),
                                         ),
-                                        const SizedBox(height: 12),
-                                        SizedBox(
-                                          width: double.infinity,
-                                          child: ElevatedButton.icon(
-                                            onPressed: _isGeneratingQuizzes ? null : _generateGeminiQuizzes,
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: const Color(0xFFD946EF),
-                                              foregroundColor: Colors.white,
-                                              padding: const EdgeInsets.symmetric(vertical: 14),
-                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        if (_tabController.index == 0) ...[
+                                          const SizedBox(height: 12),
+                                          SizedBox(
+                                            width: double.infinity,
+                                            child: ElevatedButton.icon(
+                                              onPressed: _isGeneratingQuizzes ? null : _generateGeminiQuizzes,
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: const Color(0xFFD946EF),
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                              ),
+                                              icon: _isGeneratingQuizzes
+                                                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                                  : const Icon(Icons.auto_awesome, size: 16),
+                                              label: Text(_isGeneratingQuizzes ? 'Generating with Gemini...' : '✨ Generate Quizzes with Gemini', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                             ),
-                                            icon: _isGeneratingQuizzes
-                                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                                : const Icon(Icons.auto_awesome, size: 16),
-                                            label: Text(_isGeneratingQuizzes ? 'Generating with Gemini...' : '✨ Generate Quizzes with Gemini', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                           ),
-                                        ),
+                                        ],
                                       ],
                                     ),
 
@@ -859,8 +888,10 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
                                             setState(() {
                                               _selectedTrack = t;
                                               _customRoleController.text = t;
-                                              _startQuiz();
                                             });
+                                            if (_tabController.index == 0) {
+                                              _generateGeminiQuizzes();
+                                            }
                                           },
                                         );
                                       }),
@@ -876,6 +907,9 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
                                               _selectedLevel = l;
                                               _customSeniorityController.text = l;
                                             });
+                                            if (_tabController.index == 0) {
+                                              _generateGeminiQuizzes();
+                                            }
                                           },
                                         );
                                       }),
@@ -911,6 +945,38 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
 
   // --- QUIZ TAB CONTENT ---
   Widget _buildQuizTab(bool isDesktop) {
+    if (_isGeneratingQuizzes && _dynamicQuizzes.isEmpty) {
+      final targetRole = _customRoleController.text.trim().isNotEmpty ? _customRoleController.text.trim() : _selectedTrack;
+      final targetSeniority = _customSeniorityController.text.trim().isNotEmpty ? _customSeniorityController.text.trim() : _selectedLevel;
+      return AppCard(
+        padding: const EdgeInsets.all(40),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 36,
+                height: 36,
+                child: CircularProgressIndicator(color: Color(0xFFD946EF), strokeWidth: 3),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                '✨ Gemini AI is crafting custom technical MCQs for "$targetRole" ($targetSeniority)...',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Generating realistic scenarios, options, correct answers, and architectural explanations...',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final questions = _getActiveQuizList();
 
     if (questions.isEmpty) {

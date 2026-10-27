@@ -46,6 +46,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
   // AI Auto Suggestions
   List<String> _aiSuggestions = [];
   bool _isLoadingSuggestions = false;
+  Timer? _typingDebounce;
 
   @override
   void initState() {
@@ -66,6 +67,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _typingDebounce?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -272,6 +274,34 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     });
   }
 
+  void _onMessageTextChanged(String val) {
+    _typingDebounce?.cancel();
+    final text = val.trim();
+    if (text.isEmpty) {
+      _typingDebounce = Timer(const Duration(milliseconds: 350), () {
+        if (!mounted) return;
+        if (_selectedTab == ChatTab.direct) {
+          _fetchAiSuggestions();
+        } else {
+          _fetchGroupAiSuggestions();
+        }
+      });
+      return;
+    }
+
+    // Debounce 600ms while candidate/recruiter types their draft
+    if (text.length >= 3) {
+      _typingDebounce = Timer(const Duration(milliseconds: 600), () {
+        if (!mounted) return;
+        if (_selectedTab == ChatTab.direct) {
+          _fetchAiSuggestions();
+        } else {
+          _fetchGroupAiSuggestions();
+        }
+      });
+    }
+  }
+
   void _showRenameGroupDialog() {
     if (_activeGroup == null) return;
     final titleCtrl = TextEditingController(text: _activeGroup!['title'] ?? '');
@@ -364,12 +394,14 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                           final interviewId = _activeGroup!['id'] as int;
                           await _repo.updateMeetingGroup(interviewId: interviewId, addUserId: c.id);
                           _fetchMeetingGroups();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              backgroundColor: const Color(0xFF10B981),
-                              content: Text('${c.name} added to this group!'),
-                            ),
-                          );
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(
+                                backgroundColor: const Color(0xFF10B981),
+                                content: Text('${c.name} added to this group!'),
+                              ),
+                            );
+                          }
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF38BDF8),
@@ -973,6 +1005,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
   }
 
   Widget _buildSuggestionsAndInput() {
+    final hasDraft = _textController.text.trim().isNotEmpty;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -988,7 +1021,10 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
               children: [
                 const Icon(Icons.auto_awesome, color: Color(0xFFD946EF), size: 15),
                 const SizedBox(width: 8),
-                const Text('AI Suggestions:', style: TextStyle(color: Color(0xFFD946EF), fontSize: 11, fontWeight: FontWeight.bold)),
+                Text(
+                  hasDraft ? '✨ AI Grammar & Polish:' : 'AI Suggestions:',
+                  style: const TextStyle(color: Color(0xFFD946EF), fontSize: 11, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: SingleChildScrollView(
@@ -998,7 +1034,10 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                           ? [
                               const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Color(0xFFD946EF), strokeWidth: 2)),
                               const SizedBox(width: 8),
-                              const Text('Generating Gemini suggestions...', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                              Text(
+                                hasDraft ? 'Gemini correcting grammar & refining draft...' : 'Generating Gemini suggestions...',
+                                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                              ),
                             ]
                           : _aiSuggestions.map((s) {
                               return Padding(
@@ -1006,9 +1045,13 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                                 child: ActionChip(
                                   backgroundColor: const Color(0xFF1E2138),
                                   side: BorderSide(color: const Color(0xFFD946EF).withOpacity(0.35)),
+                                  tooltip: 'Click to use this polished version in text box',
                                   label: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 11)),
                                   onPressed: () {
-                                    setState(() => _textController.text = s);
+                                    setState(() {
+                                      _textController.text = s;
+                                      _textController.selection = TextSelection.fromPosition(TextPosition(offset: s.length));
+                                    });
                                   },
                                 ),
                               );
@@ -1039,6 +1082,7 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                 child: TextField(
                   controller: _textController,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
+                  onChanged: _onMessageTextChanged,
                   decoration: InputDecoration(
                     hintText: _selectedTab == ChatTab.direct ? 'Type your message...' : 'Chat with live meeting participants...',
                     hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13),

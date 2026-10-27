@@ -753,27 +753,59 @@
         },
 
         speak: function(text, onStart, onEnd) {
-          if (!('speechSynthesis' in window)) return false;
+          if (!('speechSynthesis' in window)) {
+            if (onEnd) onEnd();
+            return false;
+          }
           try {
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 0.95;
-            utterance.pitch = 1.05;
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
             utterance.lang = 'en-US';
 
             const voices = window.speechSynthesis.getVoices();
             const preferred = voices.find(v => (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Victoria')) && v.lang.startsWith('en')) || voices.find(v => v.lang.startsWith('en'));
             if (preferred) utterance.voice = preferred;
 
-            if (onStart) utterance.onstart = onStart;
-            if (onEnd) {
-              utterance.onend = onEnd;
-              utterance.onerror = onEnd;
-            }
+            let completed = false;
+            let resumeTimer = null;
+            let safetyTimer = null;
+
+            const handleFinish = function() {
+              if (completed) return;
+              completed = true;
+              if (resumeTimer) clearInterval(resumeTimer);
+              if (safetyTimer) clearTimeout(safetyTimer);
+              if (onEnd) onEnd();
+            };
+
+            utterance.onstart = function() {
+              if (onStart) onStart();
+              // Chrome fix: SpeechSynthesis pause/resume keepalive
+              resumeTimer = setInterval(function() {
+                if (!window.speechSynthesis.speaking) {
+                  clearInterval(resumeTimer);
+                } else {
+                  window.speechSynthesis.pause();
+                  window.speechSynthesis.resume();
+                }
+              }, 4000);
+            };
+
+            utterance.onend = handleFinish;
+            utterance.onerror = handleFinish;
+
+            // Fallback safety timeout based on word count
+            const words = (text || '').trim().split(/\s+/).length;
+            const maxDurationMs = Math.max(7000, Math.ceil((words / 2.2) * 1000) + 3000);
+            safetyTimer = setTimeout(handleFinish, maxDurationMs);
+
             window.speechSynthesis.speak(utterance);
             return true;
           } catch (e) {
             console.warn('Speech synthesis error:', e);
+            if (onEnd) onEnd();
             return false;
           }
         },
