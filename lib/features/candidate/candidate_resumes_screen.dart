@@ -285,23 +285,54 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.auto_awesome, color: AppColors.accentCyan, size: 24),
-                                        const SizedBox(width: 10),
-                                        Text('ATS Score & Deep Scan Report', style: AppTypography.titleLarge.copyWith(fontWeight: FontWeight.bold)),
-                                        const Spacer(),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                                          decoration: BoxDecoration(
-                                            color: AppColors.success.withOpacity(0.2),
-                                            borderRadius: BorderRadius.circular(20),
-                                            border: Border.all(color: AppColors.success.withOpacity(0.4)),
+                                    if (isDesktop)
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.auto_awesome, color: AppColors.accentCyan, size: 24),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text('ATS Score & Deep Scan Report', style: AppTypography.titleLarge.copyWith(fontWeight: FontWeight.bold)),
                                           ),
-                                          child: const Text('Top 10% Candidate', style: TextStyle(color: AppColors.success, fontWeight: FontWeight.bold, fontSize: 11)),
-                                        ),
-                                      ],
-                                    ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.success.withOpacity(0.2),
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: Border.all(color: AppColors.success.withOpacity(0.4)),
+                                            ),
+                                            child: const Text('Top 10% Candidate', style: TextStyle(color: AppColors.success, fontWeight: FontWeight.bold, fontSize: 11)),
+                                          ),
+                                        ],
+                                      )
+                                    else
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              const Icon(Icons.auto_awesome, color: AppColors.accentCyan, size: 20),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  'ATS Deep Scan Report',
+                                                  style: AppTypography.titleLarge.copyWith(fontWeight: FontWeight.bold, fontSize: 17),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.success.withOpacity(0.2),
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: Border.all(color: AppColors.success.withOpacity(0.4)),
+                                            ),
+                                            child: const Text('Top 10% Candidate', style: TextStyle(color: AppColors.success, fontWeight: FontWeight.bold, fontSize: 11)),
+                                          ),
+                                        ],
+                                      ),
                                     const SizedBox(height: 24),
                                     if (isDesktop)
                                       Row(
