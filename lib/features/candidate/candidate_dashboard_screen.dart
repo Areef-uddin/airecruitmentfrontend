@@ -266,7 +266,7 @@ class _CandidateDashboardScreenState extends ConsumerState<CandidateDashboardScr
                                         if (isDesktop) ...[
                                           OutlinedButton.icon(
                                             onPressed: () {
-                                              final origin = kIsWeb ? Uri.base.origin : 'http://localhost:3000';
+                                              final origin = ApiConfig.webOrigin;
                                               final fullUrl = '$origin/#$roomTarget';
                                               Clipboard.setData(ClipboardData(text: fullUrl));
                                               ScaffoldMessenger.of(context).showSnackBar(
@@ -324,7 +324,7 @@ class _CandidateDashboardScreenState extends ConsumerState<CandidateDashboardScr
                                           Expanded(
                                             child: OutlinedButton.icon(
                                               onPressed: () {
-                                                final origin = kIsWeb ? Uri.base.origin : 'http://localhost:3000';
+                                                final origin = ApiConfig.webOrigin;
                                                 final fullUrl = '$origin/#$roomTarget';
                                                 Clipboard.setData(ClipboardData(text: fullUrl));
                                                 ScaffoldMessenger.of(context).showSnackBar(

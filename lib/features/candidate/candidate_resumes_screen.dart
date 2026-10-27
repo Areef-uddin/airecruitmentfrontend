@@ -46,7 +46,7 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
     }
   }
 
-  Future<void> _uploadResume() async {
+  Future<void> _uploadResume({bool isReupload = false}) async {
     try {
       final files = await FilePicker.pickFiles(
         type: FileType.custom,
@@ -72,7 +72,6 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
 
         await dio.post(ApiConfig.resumes, data: formData);
       } catch (_) {
-        // Fallback to parse endpoint
         await dio.post(
           ApiConfig.aiResumeParse,
           data: {
@@ -88,7 +87,9 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${file.name} uploaded and analyzed by ATS Engine!'),
+            content: Text(isReupload
+                ? '✨ ${file.name} successfully re-uploaded & analyzed with real Gemini ATS scoring!'
+                : '✨ ${file.name} uploaded and scanned with real Gemini ATS score!'),
             backgroundColor: AppColors.success,
           ),
         );
@@ -173,11 +174,29 @@ class _CandidateResumesScreenState extends ConsumerState<CandidateResumesScreen>
                                     ],
                                   ),
                                 ),
-                                AppButton(
-                                  label: 'Upload PDF / DOCX',
-                                  icon: const Icon(Icons.upload_file, size: 18, color: Colors.white),
-                                  isLoading: _isUploading,
-                                  onPressed: _uploadResume,
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  children: [
+                                    if (_resumes.isNotEmpty)
+                                      OutlinedButton.icon(
+                                        onPressed: _isUploading ? null : () => _uploadResume(isReupload: true),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: const Color(0xFFD946EF),
+                                          side: const BorderSide(color: Color(0xFFD946EF)),
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        icon: const Icon(Icons.sync, size: 16, color: Color(0xFFD946EF)),
+                                        label: const Text('Re-upload Resume', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                      ),
+                                    AppButton(
+                                      label: 'Upload Resume',
+                                      icon: const Icon(Icons.upload_file, size: 18, color: Colors.white),
+                                      isLoading: _isUploading,
+                                      onPressed: () => _uploadResume(isReupload: false),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),

@@ -254,11 +254,26 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
     _webrtcService.startSpeechRecognition(
       targetLang: _selectedLanguage,
       onResult: (text, translated) {
-        if (!mounted) return;
+        if (!mounted || text.isEmpty) return;
+        final user = ref.read(authProvider).user;
+        final myName = user?.fullName ?? user?.email ?? 'Participant';
+
         setState(() {
           _currentSubtitle = text;
           _translatedSubtitle = translated;
         });
+
+        // Broadcast caption so all participants in the meeting see live subtitles
+        _interviewRepo.sendSignal(
+          room: _roomId,
+          fromUser: _myParticipantId,
+          type: 'caption',
+          payload: {
+            'speaker': myName,
+            'text': text,
+            'translated': translated,
+          },
+        );
 
         _subtitleClearTimer?.cancel();
         _subtitleClearTimer = Timer(const Duration(seconds: 5), () {
@@ -378,9 +393,36 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
           _handleMeetingEndedByHost();
         } else if (sigType == 'ai_mode') {
           _handleAIModeToggled(payload);
+        } else if (sigType == 'caption') {
+          _handleIncomingCaption(payload);
         }
       }
     } catch (_) {}
+  }
+
+  void _handleIncomingCaption(dynamic payload) {
+    if (payload is Map && mounted) {
+      final speaker = payload['speaker']?.toString() ?? 'Participant';
+      final text = payload['text']?.toString() ?? '';
+      final translated = payload['translated']?.toString() ?? '';
+      if (text.isNotEmpty) {
+        setState(() {
+          _currentSubtitle = '$speaker: $text';
+          if (translated.isNotEmpty) {
+            _translatedSubtitle = '$speaker: $translated';
+          }
+        });
+        _subtitleClearTimer?.cancel();
+        _subtitleClearTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted) {
+            setState(() {
+              _currentSubtitle = '';
+              _translatedSubtitle = '';
+            });
+          }
+        });
+      }
+    }
   }
 
   void _handleMediaStateUpdate(String userId, dynamic payload) {
@@ -644,6 +686,18 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
       type: 'chat',
       payload: msg,
     );
+
+    // Sync live in-call message to Meeting Groups backend
+    final targetId = _interviewId ?? int.tryParse(_roomId.replaceAll('interview_', ''));
+    if (targetId != null) {
+      ApiClient().dio.post(
+        ApiConfig.chatMeetingGroups,
+        data: {
+          'interview_id': targetId,
+          'text': text,
+        },
+      ).ignore();
+    }
   }
 
   void _sendCopilotMessage() async {
@@ -931,7 +985,7 @@ class _AIInterviewScreenState extends ConsumerState<AIInterviewScreen> {
   }
 
   String _getExactMeetingLink() {
-    final origin = kIsWeb ? Uri.base.origin : 'http://localhost:3000';
+    final origin = ApiConfig.webOrigin;
     return '$origin/#/live-interview?room=$_roomId${_interviewId != null ? "&id=$_interviewId" : ""}';
   }
 

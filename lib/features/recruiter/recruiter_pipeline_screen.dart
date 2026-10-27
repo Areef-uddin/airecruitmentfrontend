@@ -10,6 +10,9 @@ import '../../shared/widgets/app_card.dart';
 import '../../shared/widgets/status_badge.dart';
 import '../../providers/auth_provider.dart';
 import '../../repositories/application_repository.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:html' as html;
+import '../../core/config/api_config.dart';
 import '../../models/application_model.dart';
 import '../../repositories/interview_repository.dart';
 
@@ -215,12 +218,38 @@ class _RecruiterPipelineScreenState extends ConsumerState<RecruiterPipelineScree
                         children: [
                           const Icon(Icons.description_outlined, color: AppColors.primary, size: 20),
                           const SizedBox(width: 8),
-                          Text(
-                            resume?['file_name'] ?? 'Candidate_Resume.pdf',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          Expanded(
+                            child: Text(
+                              resume?['file_name'] ?? 'Candidate_Resume.pdf',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          const Spacer(),
-                          const Text('ATS Verified', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              final rawUrl = resume?['file_url'] ?? resume?['file']?.toString();
+                              if (rawUrl != null && rawUrl.isNotEmpty) {
+                                final fullUrl = rawUrl.startsWith('http')
+                                    ? rawUrl
+                                    : '${ApiConfig.liveProductionUrl.replaceAll('/api', '')}$rawUrl';
+                                if (kIsWeb) {
+                                  html.window.open(fullUrl, '_blank');
+                                }
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Candidate resume ATS profile loaded below.')),
+                                );
+                              }
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF38BDF8),
+                              side: const BorderSide(color: Color(0xFF38BDF8)),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            ),
+                            icon: const Icon(Icons.open_in_new, size: 13, color: Color(0xFF38BDF8)),
+                            label: const Text('View File', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
                         ],
                       ),
                       if (skills.isNotEmpty) ...[

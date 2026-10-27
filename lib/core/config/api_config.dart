@@ -1,6 +1,18 @@
 class ApiConfig {
   // Production Live Render Backend URL
   static const String liveProductionUrl = 'https://airecruitmentbackend.onrender.com/api';
+  static const String liveFrontendUrl = 'https://airecruitmentfrontend.vercel.app';
+
+  // Dynamic web origin: uses hosted Vercel frontend URL, never localhost
+  static String get webOrigin {
+    if (kIsWeb) {
+      final origin = Uri.base.origin;
+      if (origin.isNotEmpty && !origin.contains('localhost') && !origin.contains('127.0.0.1')) {
+        return origin;
+      }
+    }
+    return liveFrontendUrl;
+  }
 
   // Manual runtime override if needed
   static String? overrideBaseUrl;
@@ -75,6 +87,7 @@ class ApiConfig {
   static const String aiMatchCandidate = '/ai/match-candidate/';
   static const String aiGenerateQuestions = '/ai/generate-interview-questions/';
   static const String aiGenerateQuizzes = '/ai/generate-quizzes/';
+  static const String aiMockSummary = '/ai/mock-summary/';
   static const String aiAssistant = '/ai/assistant/';
   static const String aiTranslate = '/ai/translate/';
   static const String aiImproveText = '/ai/improve-text/';

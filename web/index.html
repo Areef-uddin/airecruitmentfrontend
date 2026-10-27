@@ -195,7 +195,13 @@
         Object.values(peers).forEach(p => {
           if (p.audioElem && p.audioElem.srcObject) {
             p.audioElem.muted = false;
+            p.audioElem.volume = 1.0;
             p.audioElem.play().catch(() => {});
+          }
+          if (p.videoElem && p.videoElem.srcObject) {
+            p.videoElem.muted = false;
+            p.videoElem.volume = 1.0;
+            p.videoElem.play().catch(() => {});
           }
         });
       };
@@ -383,8 +389,10 @@
             }
             if (peer) {
               peer.videoElem = videoElem;
-              if (peer.remoteStream && peer.remoteStream.getVideoTracks().length > 0) {
+              if (peer.remoteStream) {
                 videoElem.srcObject = peer.remoteStream;
+                videoElem.muted = false;
+                videoElem.volume = 1.0;
                 videoElem.play().catch(() => {});
               }
             }

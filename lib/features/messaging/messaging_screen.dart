@@ -137,7 +137,8 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     setState(() {
       _activeGroup = group;
       _activeContact = null;
-      _groupMessages = (group['messages'] as List? ?? []).cast<Map<String, dynamic>>();
+      final rawMsgs = (group['messages'] ?? group['chat_history'] as List? ?? []);
+      _groupMessages = rawMsgs.cast<Map<String, dynamic>>();
       _aiSuggestions = [];
     });
     _scrollToBottom();
@@ -148,7 +149,8 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     if (_activeConversationId == null) return;
     final msgs = await _repo.getMessages(_activeConversationId!);
     if (!mounted) return;
-    if (msgs.length != _messages.length) {
+    final existingIds = _messages.map((m) => m.id).toSet();
+    if (msgs.length != _messages.length || msgs.any((m) => !existingIds.contains(m.id))) {
       setState(() => _messages = msgs);
       _scrollToBottom();
     }
@@ -162,7 +164,8 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
       (g) => g['id'] == _activeGroup!['id'],
       orElse: () => _activeGroup!,
     );
-    final updatedMsgs = (match['messages'] as List? ?? []).cast<Map<String, dynamic>>();
+    final rawMsgs = (match['messages'] ?? match['chat_history'] as List? ?? []);
+    final updatedMsgs = rawMsgs.cast<Map<String, dynamic>>();
     if (updatedMsgs.length != _groupMessages.length) {
       setState(() {
         _activeGroup = match;
@@ -178,9 +181,10 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
     _textController.clear();
 
     if (_selectedTab == ChatTab.direct && _activeConversationId != null) {
+      final tempId = DateTime.now().millisecondsSinceEpoch;
       setState(() {
         _messages.add(ChatMessageItem(
-          id: DateTime.now().millisecondsSinceEpoch,
+          id: tempId,
           conversationId: _activeConversationId!,
           body: text,
           isRead: false,
@@ -189,24 +193,38 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
         ));
       });
       _scrollToBottom();
-      await _repo.sendMessage(_activeConversationId!, text);
+      try {
+        final serverMsg = await _repo.sendMessage(_activeConversationId!, text);
+        if (mounted) {
+          setState(() {
+            final idx = _messages.indexWhere((m) => m.id == tempId);
+            if (idx != -1) {
+              _messages[idx] = serverMsg;
+            } else if (!_messages.any((m) => m.id == serverMsg.id)) {
+              _messages.add(serverMsg);
+            }
+          });
+        }
+      } catch (_) {}
       _pollMessages();
       _fetchAiSuggestions();
     } else if (_selectedTab == ChatTab.groups && _activeGroup != null) {
       final interviewId = _activeGroup!['id'] as int;
-      final userName = ref.read(authProvider).user?.fullName ?? 'You';
 
-      setState(() {
-        _groupMessages.add({
-          'sender': userName,
-          'body': text,
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      });
-      _scrollToBottom();
-      await _repo.sendMeetingGroupMessage(interviewId, text);
-      _pollGroupMessages();
-      _fetchGroupAiSuggestions();
+      final sent = await _repo.sendMeetingGroupMessage(interviewId, text);
+      if (mounted) {
+        if (sent != null && sent['message'] is Map) {
+          final newMsg = (sent['message'] as Map).cast<String, dynamic>();
+          setState(() {
+            if (!_groupMessages.any((m) => m['id'] == newMsg['id'])) {
+              _groupMessages.add(newMsg);
+            }
+          });
+        }
+        _scrollToBottom();
+        _pollGroupMessages();
+        _fetchGroupAiSuggestions();
+      }
     }
   }
 
@@ -909,8 +927,8 @@ class _MessagingScreenState extends ConsumerState<MessagingScreen> {
                     final m = _groupMessages[idx];
                     final sender = m['sender']?.toString() ?? 'Participant';
                     final isMe = sender == 'You' || sender.toLowerCase().contains(currentUserName.toLowerCase());
-                    final body = m['body']?.toString() ?? '';
-                    final createdAt = m['created_at']?.toString() ?? '';
+                    final body = (m['body'] ?? m['text'] ?? '').toString();
+                    final createdAt = (m['created_at'] ?? m['time'] ?? '').toString();
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
