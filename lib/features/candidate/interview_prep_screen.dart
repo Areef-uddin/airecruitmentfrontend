@@ -12,8 +12,7 @@ import '../../shared/widgets/score_gauge.dart';
 import '../../providers/auth_provider.dart';
 import '../../core/network/api_client.dart';
 import '../../core/config/api_config.dart';
-import '../interview/webrtc/webrtc_service_stub.dart'
-    if (dart.library.html) '../interview/webrtc/webrtc_service_web.dart';
+import '../interview/webrtc/webrtc_service.dart';
 
 class InterviewPrepScreen extends ConsumerStatefulWidget {
   const InterviewPrepScreen({super.key});
@@ -234,7 +233,7 @@ class _InterviewPrepScreenState extends ConsumerState<InterviewPrepScreen> with 
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _webrtcService = getWebRTCService();
+    _webrtcService = createWebRTCService();
     _fetchCandidateResume();
   }
 
